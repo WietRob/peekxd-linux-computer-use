@@ -1,0 +1,68 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "peekxd-linux"
+version = "0.3.2"
+description = "Linux automation that sees the screen and does the clicks"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Desktop Environment",
+]
+dependencies = [
+    "click>=8.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+vision = [
+    "openai>=1.0",
+    "anthropic>=0.25",
+    "requests>=2.31",
+]
+mcp = [
+    "fastmcp>=0.4",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "black>=23.0",
+    "ruff>=0.1",
+]
+all = [
+    "openai>=1.0",
+    "anthropic>=0.25",
+    "requests>=2.31",
+    "fastmcp>=0.4",
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+peekxd = "peekxd.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/peekxd-linux/peekxd"
+Repository = "https://github.com/peekxd-linux/peekxd"
+
+[tool.setuptools.packages.find]
+include = ["peekxd*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]

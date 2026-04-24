@@ -1,0 +1,162 @@
+"""Tests for the MCP server."""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from peekxd.config import ConfigManager
+from peekxd.mcp_server import create_mcp_server
+
+
+class TestMCPServer:
+    """Test suite for MCP server creation."""
+
+    @pytest.fixture
+    def config(self, tmp_path):
+        """Provide a temporary ConfigManager."""
+        return ConfigManager(str(tmp_path / "config.json"))
+
+    def test_create_mcp_server_import_error(self):
+        """Server creation raises ImportError when fastmcp is not installed."""
+        with patch("peekxd.mcp_server.server.FastMCP", None):
+            with pytest.raises(ImportError, match="fastmcp not installed"):
+                create_mcp_server()
+
+    def test_create_mcp_server_returns_instance(self, config):
+        """create_mcp_server returns a FastMCP instance."""
+        mock_mcp = MagicMock()
+        mock_mcp.tool = MagicMock(return_value=lambda f: f)
+        with patch("peekxd.mcp_server.server.FastMCP", return_value=mock_mcp):
+            server = create_mcp_server(config)
+            assert server is mock_mcp
+
+    def _collect_tools(self, config):
+        """Helper: create server and collect all registered tool functions."""
+        registered = []
+
+        def capture_tool(func):
+            registered.append(func)
+            return func
+
+        mock_mcp = MagicMock()
+        mock_mcp.tool = MagicMock(return_value=capture_tool)
+        with patch("peekxd.mcp_server.server.FastMCP", return_value=mock_mcp):
+            create_mcp_server(config)
+        return registered, mock_mcp
+
+    def test_tools_registered(self, config):
+        """All expected tools are registered on the MCP server."""
+        registered, _mock_mcp = self._collect_tools(config)
+        tool_names = [f.__name__ for f in registered]
+
+        expected_tools = [
+            "capture_screen",
+            "move_mouse",
+            "click",
+            "type_text",
+            "press_key",
+            "list_windows",
+            "focus_window",
+            "get_ui_tree",
+            "find_element",
+            "analyze_image",
+            "get_active_window",
+        ]
+        for tool_name in expected_tools:
+            assert tool_name in tool_names, f"Tool {tool_name} not registered"
+
+    @patch("peekxd.mcp_server.server._get_screenshot")
+    def test_capture_screen(self, mock_get_screenshot, config):
+        """capture_screen tool delegates to screenshot provider."""
+        mock_provider = MagicMock()
+        mock_provider.capture_screen.return_value = "/tmp/test.png"
+        mock_get_screenshot.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        capture_screen_func = [f for f in registered if f.__name__ == "capture_screen"][0]
+        result = capture_screen_func(output_path="/tmp/out.png", mode="screen")
+        assert result["success"] is True
+        assert result["mode"] == "screen"
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_move_mouse(self, mock_get_input, config):
+        """move_mouse tool delegates to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        move_mouse_func = [f for f in registered if f.__name__ == "move_mouse"][0]
+        result = move_mouse_func(x=100, y=200)
+        assert result["success"] is True
+        assert result["x"] == 100
+        assert result["y"] == 200
+        mock_provider.move_mouse.assert_called_once_with(100, 200)
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_click(self, mock_get_input, config):
+        """click tool delegates to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        click_func = [f for f in registered if f.__name__ == "click"][0]
+        result = click_func(x=50, y=60, button="right")
+        assert result["success"] is True
+        assert result["button"] == "right"
+        mock_provider.click.assert_called_once_with(50, 60, "right")
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_type_text(self, mock_get_input, config):
+        """type_text tool delegates to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        type_text_func = [f for f in registered if f.__name__ == "type_text"][0]
+        result = type_text_func(text="hello")
+        assert result["success"] is True
+        assert result["text"] == "hello"
+        mock_provider.type_text.assert_called_once_with("hello")
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_press_key(self, mock_get_input, config):
+        """press_key tool delegates to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        press_key_func = [f for f in registered if f.__name__ == "press_key"][0]
+        result = press_key_func(key="Return")
+        assert result["success"] is True
+        assert result["key"] == "Return"
+        mock_provider.key_press.assert_called_once_with("Return")
+
+    @patch("peekxd.mcp_server.server._get_window")
+    def test_list_windows(self, mock_get_window, config):
+        """list_windows tool returns window list."""
+        mock_provider = MagicMock()
+        mock_provider.list_windows.return_value = [
+            {"id": "win1", "title": "Test Window"}
+        ]
+        mock_get_window.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        list_windows_func = [f for f in registered if f.__name__ == "list_windows"][0]
+        result = list_windows_func()
+        assert len(result) == 1
+        assert result[0]["id"] == "win1"
+
+    @patch("peekxd.mcp_server.server._get_window")
+    def test_focus_window(self, mock_get_window, config):
+        """focus_window tool focuses a window."""
+        mock_provider = MagicMock()
+        mock_get_window.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        focus_window_func = [f for f in registered if f.__name__ == "focus_window"][0]
+        result = focus_window_func(window_id="0x01")
+        assert result["success"] is True
+        assert result["window_id"] == "0x01"
+        mock_provider.focus_window.assert_called_once_with("0x01")
