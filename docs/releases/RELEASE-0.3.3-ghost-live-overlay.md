@@ -5,37 +5,55 @@
 - **Datum:** 2026-04-24
 - **Kanonisches Repo:** `~/projects/peekxd-linux-computer-use`
 
-## Teststatus
+## Code-Release (Tag v0.3.3-ghost-live-overlay)
 
-- Full suite: TBD (wird in Phase 7 bewiesen)
+- **Commit:** e3d0a6a
+- **Tag:** v0.3.3-ghost-live-overlay
+- **Dateien geaendert:** 11 (5 Modified, 6 Added)
+- **Zeilen:** +924 / -5
 
-## GUI-Backend-Forensik (Phase 1)
+## Tests
 
-- XDG_SESSION_TYPE: wayland
-- DISPLAY: :0
-- tkinter: AVAILABLE → Primaer-Backend
-- gi (GTK): AVAILABLE
-- PyQt6/PySide6: nicht verfuegbar
-- zenity, notify-send, grim, slurp: vorhanden
+- **Unit-Tests:** 401/401 passed
+- **Overlay-Tests:** 36 new (18 overlay + 12 orchestrator_overlay + 6 cli_overlay)
+- **Shadow/Ghost-Regression:** bestaetigt
 
-## Kern-Aenderungen gegen V0.3.2
+## GUI-Backend (Tkinter Smoke Test)
 
-- **Neu:** `peekxd/core/overlay.py` — OverlayDecision, OverlayRequest, BaseOverlayBackend, NoopOverlayBackend, TkinterOverlayBackend, GhostOverlayController
-- **Geaendert:** `peekxd/agent/orchestrator.py` — Overlay-Integration im GHOST-Pfad, neue Parameter
-- **Geaendert:** `peekxd/cli.py` — `--ghost-overlay`, `--ghost-overlay-timeout`, `--ghost-overlay-backend`
-- **Neu:** `tests/test_overlay.py` — Overlay-Unit-Tests
-- **Neu:** `tests/test_orchestrator_overlay.py` — Orchestrator-Overlay-Integration
-- **Neu:** `tests/test_cli_overlay.py` — CLI-Flag-Tests
-- **Neu:** `docs/adr/ADR-0003-softbox-ghost-live-overlay.md`
-- **Geaendert:** `pyproject.toml` — Version 0.3.3
-- **Geaendert:** `README.md`, `SKILL.md` — Doku
+- **XDG_SESSION_TYPE:** wayland
+- **DISPLAY:** :0
+- **tkinter:** AVAILABLE
+- **TkinterOverlayBackend Smoke:** PASS
+  - decision: `{'approved': False, 'cancelled': False, 'timed_out': True, 'backend': 'tkinter', 'reason': 'Timed out after 2s'}`
+  - elapsed: 2.03s
+  - kein Haenger
 
-## Sicherheit
+## GHOST Non-Execution Semantics
 
-- Overlay bestätigt nur Preview, fuehrt NICHT aus.
-- GHOST bleibt `blocked=True`, `executed=False` auch bei Approval.
-- Overlay darf niemals selbst klicken oder tippen.
+- **approved=True → _execute_action NOT called:** PASS
+- **executed=False in Result:** PASS
+- **executed=False in Audit:** PASS
+- **overlay_decision in Result + Audit:** PASS
 
-## Hinweis
+## Release-Artefakte (Review-korrigiert)
 
-Commit/Tag/SHA256 werden nach Phase 9 ergaenzt.
+- **Finaler Patch:** `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay_FINAL.patch`
+  - 1081 Zeilen, 11 diff-headers, alle Pflichtdateien enthalten
+- **Alles Patch (unvollstaendig):** `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay.patch`
+  - 199 Zeilen, 5 diff-headers — ENTHAELT NUR MODIFIED FILES, FEHLT 6 NEUE DATEIEN
+- **REVIEWED ZIP:** `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.zip`
+  - 158K, 109 Dateien, CLEAN
+- **Ursprungs-ZIP (unreviewed):** `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay.zip`
+  - 158K — Inhalte korrekt aber nicht review-validiert
+
+## Runtime-Sync
+
+- **Runtime-Pfad:** `~/.hermes/skills/linux-computer-use`
+- **Runtime-Version:** 0.3.3
+- **Runtime-Tests:** 401/401 passed
+
+## Governance
+
+- **OPT-ID:** OPT-011 (V3 Implementation) + OPT-012 (Release-Integrity Review)
+- **validate:** ALL RECORDS VALID
+- **gate:** PASS
