@@ -61,6 +61,20 @@ Before/after screenshot capture for normal UI-modifying actions:
   Audit includes zone="shadow", executed=True, screenshot_before/after.
   No rollback. No live overlay.
 
+### Softbox Ghost Live Overlay (v0.3.3 — V3)
+Live overlay window for GHOST actions:
+- **Tkinter overlay** shows action, risk factors, screenshot, approve/cancel buttons.
+- **Timeout**: auto-cancels after configurable seconds (default: 5).
+- **Noop fallback**: headless/CI environments use NoopOverlayBackend.
+- GHOST remains non-executing even if user approves. V3 is preview-only overlay.
+- Lazy imports: tkinter loaded only when overlay is shown.
+
+```bash
+peekxd agent run "TASK" --ghost --ghost-overlay              # Force ghost + show overlay
+peekxd agent run "TASK" --ghost-overlay --ghost-overlay-timeout 10  # Custom timeout
+peekxd agent run "TASK" --ghost-overlay --ghost-overlay-backend noop  # Noop backend
+```
+
 ```bash
 peekxd agent run "TASK" --ghost              # Force all actions to preview only
 peekxd safety zone click '{"x": 100, "y": 200}' # Returns SHADOW for safe clicks
@@ -330,5 +344,6 @@ peekxd mcp  # stdio mode for Claude Desktop, Cursor, etc.
 
 0.3.0 — Hermes Agent Edition with Safety, Memory, Audit, Cleanup
 +
-+0.3.2 — Softbox Shadow Mode V2: before/after snapshots with shadow audit for normal actions
+0.3.3 — Softbox Ghost Live Overlay V3: live overlay for GHOST actions with approve/cancel/timeout
+0.3.2 — Softbox Shadow Mode V2: before/after snapshots with shadow audit for normal actions
 +0.3.1 — Softbox Ghost Mode: risk-based zone system with preview-only safety

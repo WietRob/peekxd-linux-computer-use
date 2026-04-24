@@ -334,7 +334,15 @@ def agent():
 @click.option("--no-memory", is_flag=True, help="Disable element position caching")
 @click.option("--no-audit", is_flag=True, help="Disable action logging")
 @click.option("--ghost", is_flag=True, help="Force GHOST mode: all actions as preview only (Softbox)")
-def agent_run(task, max_steps, step_delay, verbose, safety_level, no_memory, no_audit, ghost):
+@click.option("--ghost-overlay", is_flag=True, help="Show live overlay for GHOST actions (Softbox V3)")
+@click.option("--ghost-overlay-timeout", default=5, type=int,
+              help="Seconds before overlay auto-cancels (default: 5)")
+@click.option("--ghost-overlay-backend", default="auto",
+              type=click.Choice(["auto", "noop", "tkinter"]),
+              help="Overlay backend (default: auto)")
+def agent_run(task, max_steps, step_delay, verbose, safety_level,
+              no_memory, no_audit, ghost, ghost_overlay,
+              ghost_overlay_timeout, ghost_overlay_backend):
     """Run a task autonomously: TASK_DESCRIPTION.
 
     Example: peekxd agent run "Open Firefox and go to github.com"
@@ -357,6 +365,9 @@ def agent_run(task, max_steps, step_delay, verbose, safety_level, no_memory, no_
         enable_memory=not no_memory,
         enable_audit=not no_audit,
         force_ghost=ghost,
+        enable_ghost_overlay=ghost_overlay,
+        ghost_overlay_timeout=ghost_overlay_timeout,
+        ghost_overlay_backend=ghost_overlay_backend,
     )
     result = orch.run_task(task)
 

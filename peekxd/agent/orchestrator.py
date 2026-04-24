@@ -74,6 +74,9 @@ class AgentOrchestrator:
         enable_audit: bool = True,
         enable_cleanup: bool = True,
         force_ghost: bool = False,
+        enable_ghost_overlay: bool = False,
+        ghost_overlay_timeout: int = 5,
+        ghost_overlay_backend: Optional[str] = None,
     ):
         """Initialize the orchestrator.
 
@@ -90,6 +93,9 @@ class AgentOrchestrator:
             enable_audit: Whether to log all actions.
             enable_cleanup: Whether to clean up temp files after run.
             force_ghost: If True, ALL actions are forced to GHOST zone (preview only).
+            enable_ghost_overlay: If True, show a live overlay for GHOST actions.
+            ghost_overlay_timeout: Seconds before overlay auto-cancels.
+            ghost_overlay_backend: Override overlay backend (auto/noop/tkinter).
         """
         self.max_steps = max_steps
         self.step_delay = step_delay
@@ -106,6 +112,10 @@ class AgentOrchestrator:
             self._cleanup.schedule(interval_minutes=30)
         self._parser = RobustJSONParser()
         self.force_ghost = force_ghost
+        self.enable_ghost_overlay = enable_ghost_overlay
+        self.ghost_overlay_timeout = ghost_overlay_timeout
+        self.ghost_overlay_backend = ghost_overlay_backend
+        self._overlay_controller = None
 
     # --- Lazy providers ---
 
@@ -149,6 +159,16 @@ class AgentOrchestrator:
     @property
     def window(self):
         return self._get_window()
+
+    def _get_overlay_controller(self):
+        """Lazy-init the GhostOverlayController."""
+        if self._overlay_controller is None:
+            from ..core.overlay import GhostOverlayController
+            self._overlay_controller = GhostOverlayController(
+                backend_name=self.ghost_overlay_backend,
+                timeout=self.ghost_overlay_timeout,
+            )
+        return self._overlay_controller
 
     # --- Core Loop ---
 
@@ -414,23 +434,48 @@ If the task is complete, use action "done"."""
             )
             preview_dict = preview.to_dict()
 
+            # V3: Show live overlay if enabled
+            overlay_decision_dict = None
+            if self.enable_ghost_overlay:
+                from ..core.overlay import OverlayRequest
+                overlay_request = OverlayRequest(
+                    action=action,
+                    params=params,
+                    preview=preview_dict,
+                    screenshot_path=screenshot_path,
+                    markup_path=preview.markup_path,
+                    timeout_seconds=self.ghost_overlay_timeout,
+                )
+                overlay_ctrl = self._get_overlay_controller()
+                overlay_decision = overlay_ctrl.show_preview(overlay_request)
+                overlay_decision_dict = overlay_decision.to_dict()
+                # NOTE: Even if approved, GHOST remains non-executing in V3.
+                # A future V3.1 may introduce approve-to-execute semantics.
+
             # Audit log with executed=False
             if self.audit:
+                audit_result = {"ghost_preview": preview_dict}
+                if overlay_decision_dict is not None:
+                    audit_result["overlay_decision"] = overlay_decision_dict
                 self.audit.log_action(
                     action=action,
                     params=params,
-                    result={"ghost_preview": preview_dict},
+                    result=audit_result,
                     zone=zone_decision.zone.value,
                     executed=False,
                 )
 
-            return {
+            result = {
                 "success": False,
                 "ghost": True,
                 "blocked": True,
+                "executed": False,
                 "preview": preview_dict,
                 "detail": f"[GHOST] Action '{action}' blocked. Reason: {zone_decision.reason}",
             }
+            if overlay_decision_dict is not None:
+                result["overlay_decision"] = overlay_decision_dict
+            return result
 
         # SHADOW zone (V2): execute with before/after snapshot
         if zone_decision.zone.value == "shadow":
