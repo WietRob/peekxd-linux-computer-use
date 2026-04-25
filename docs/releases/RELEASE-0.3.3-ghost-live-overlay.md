@@ -4,12 +4,13 @@
 - **Version:** 0.3.3
 - **Datum:** 2026-04-25
 - **Kanonisches Repo:** `~/projects/peekxd-linux-computer-use`
+- **Kanonische Build-Quelle:** Tag `v0.3.3-ghost-live-overlay-reviewed`
 
 ## Commits
 
 - **Release-Commit:** e3d0a6a (Tag: `v0.3.3-ghost-live-overlay`)
 - **Review-Commit:** 4ea38d4 (Manifest + Patch-Korrektur)
-- **Final HEAD:** 4ea38d4
+- **Final HEAD / Reviewed Tag:** siehe `git rev-parse v0.3.3-ghost-live-overlay-reviewed`
 
 ## Tests
 
@@ -34,21 +35,27 @@
 - **executed=False in Audit:** PASS
 - **overlay_decision in Result + Audit:** PASS
 
-## Release-Artefakte (Final)
+## Release-Artefakte
 
-### FINAL Patch
-- **Pfad:** `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay_FINAL.patch`
-- **Zeilen:** 1109
+Artefakte werden aus dem reviewed Tag erzeugt. SHA256-Checksums werden
+extern gespeichert, nicht hier, um selbstreferenzielle Abhaengigkeiten
+zu vermeiden (das ZIP enthaelt dieses Manifest).
+
+### Patch (aus reviewed Tag)
+- **Pfad:** `~/projects/peekxd_softbox_v3_ghost_overlay_FINAL.patch`
+- **Erzeugung:** `git diff v0.3.2-shadow-v2..v0.3.3-ghost-live-overlay-reviewed`
 - **diff-headers:** 11 (alle Pflichtdateien)
-- **Groesse:** 41,589 Bytes
-- **SHA256:** `311cb9bc85d977dd1b16eeccc67ee5f507bba9b4beba461520ee1cc5d94eff98`
+- **SHA256:** `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay_FINAL.sha256`
 
-### REVIEWED ZIP
-- **Pfad:** `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.zip`
+### ZIP (aus reviewed Tag)
+- **Pfad:** `~/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.zip`
+- **Erzeugung:** `git archive` aus reviewed Tag, verpackt als `linux-computer-use/`
 - **Dateien:** 109
-- **Groesse:** 162,379 Bytes
-- **SHA256:** `e54b51e6e38c22bfa49e722d5b53bfdfeb279d17e8be179b07c9dd7060890dd2`
 - **Clean:** kein __pycache__, keine .pytest_cache, keine egg-info
+- **SHA256:** `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.sha256`
+
+### Kombinierte Checksum-Datei
+- `/home/roberto_schmidt/projects/peekxd_v0.3.3_release_artifacts.sha256`
 
 ### Veraltete Artefakte (NICHT verwenden)
 - `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay.patch` — unvollstaendig (5/11 Dateien)
@@ -65,5 +72,6 @@
 - **OPT-011:** V3 Implementation (APPLIED)
 - **OPT-012:** Release-Integrity Review (APPLIED)
 - **OPT-013:** Final Artifact Reconciliation (APPLIED)
+- **OPT-014:** Non-Self-Referential Artifact Freeze (APPLIED)
 - **validate:** ALL RECORDS VALID
 - **gate:** PASS
