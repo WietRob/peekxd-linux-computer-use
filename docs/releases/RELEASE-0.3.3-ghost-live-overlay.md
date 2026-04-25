@@ -45,21 +45,21 @@ zu vermeiden (das ZIP enthaelt dieses Manifest).
 - **Pfad:** `~/projects/peekxd_softbox_v3_ghost_overlay_FINAL.patch`
 - **Erzeugung:** `git diff v0.3.2-shadow-v2..v0.3.3-ghost-live-overlay-reviewed`
 - **diff-headers:** 11 (alle Pflichtdateien)
-- **SHA256:** `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay_FINAL.sha256`
+- **SHA256:** `~/projects/peekxd_softbox_v3_ghost_overlay_FINAL.sha256`
 
 ### ZIP (aus reviewed Tag)
 - **Pfad:** `~/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.zip`
 - **Erzeugung:** `git archive` aus reviewed Tag, verpackt als `linux-computer-use/`
 - **Dateien:** 109
 - **Clean:** kein __pycache__, keine .pytest_cache, keine egg-info
-- **SHA256:** `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.sha256`
+- **SHA256:** `~/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay_REVIEWED.sha256`
 
 ### Kombinierte Checksum-Datei
-- `/home/roberto_schmidt/projects/peekxd_v0.3.3_release_artifacts.sha256`
+- `~/projects/peekxd_v0.3.3_release_artifacts.sha256`
 
 ### Veraltete Artefakte (NICHT verwenden)
-- `/home/roberto_schmidt/projects/peekxd_softbox_v3_ghost_overlay.patch` — unvollstaendig (5/11 Dateien)
-- `/home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay.zip` — nicht review-validiert
+- `~/projects/peekxd_softbox_v3_ghost_overlay.patch` — unvollstaendig (5/11 Dateien)
+- `~/projects/Kimi_Agent_Peekaboo_Linux_Skill_V6_Ghost_Live_Overlay.zip` — nicht review-validiert
 
 ## Runtime-Sync
 

@@ -37,5 +37,5 @@ innerhalb eines Python dict literals statt `True`).
 - `gate --source` schlägt fehl weil noch kein OPT-009 existiert
 
 ### Release Artefakte
-- Patch: /home/roberto_schmidt/projects/peekxd_softbox_v2_shadow_ONLY.patch (1300 lines)
-- ZIP: /home/roberto_schmidt/projects/Kimi_Agent_Peekaboo_Linux_Skill_V5_Softbox_Shadow_FINAL_REVIEWED.zip (150K, CLEAN)
+- Patch: ~/projects/peekxd_softbox_v2_shadow_ONLY.patch (1300 lines)
+- ZIP: ~/projects/Kimi_Agent_Peekaboo_Linux_Skill_V5_Softbox_Shadow_FINAL_REVIEWED.zip (150K, CLEAN)
