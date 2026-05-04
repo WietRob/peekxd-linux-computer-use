@@ -1,11 +1,17 @@
-"""Softbox Ghost Live Overlay for peekxd Linux (V3).
+"""Softbox Ghost Live Overlay for peekxd Linux (V3 → V4 Confirmable).
 
 Provides a user-facing overlay for GHOST actions, allowing the user to
 see a preview and explicitly approve or cancel before any action proceeds.
 
+V4 extension: Two-tier GHOST classification (HARD_BLOCKED_GHOST /
+APPROVABLE_GHOST). Approved APPROVABLE_GHOST actions execute via
+--ghost-approval-execution. HARD_BLOCKED_GHOST actions never execute.
+
 Key design rules:
 - Overlay NEVER clicks or types. It is purely a confirmation surface.
-- GHOST remains non-executing even if the user approves.
+- HARD_BLOCKED_GHOST remains non-executing even if the user approves.
+- APPROVABLE_GHOST executes only when --ghost-approval-execution is set
+  AND the user approves via overlay.
 - Lazy imports: tkinter is imported only inside TkinterOverlayBackend.show().
 - Headless/CI uses NoopOverlayBackend to avoid hangs.
 """

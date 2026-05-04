@@ -340,9 +340,10 @@ def agent():
 @click.option("--ghost-overlay-backend", default="auto",
               type=click.Choice(["auto", "noop", "tkinter"]),
               help="Overlay backend (default: auto)")
+@click.option("--ghost-approval-execution", is_flag=True, help="Allow approved, explicitly approvable GHOST actions to execute. Hard-blocked actions remain blocked. (Softbox V4)")
 def agent_run(task, max_steps, step_delay, verbose, safety_level,
               no_memory, no_audit, ghost, ghost_overlay,
-              ghost_overlay_timeout, ghost_overlay_backend):
+              ghost_overlay_timeout, ghost_overlay_backend, ghost_approval_execution):
     """Run a task autonomously: TASK_DESCRIPTION.
 
     Example: peekxd agent run "Open Firefox and go to github.com"
@@ -368,6 +369,7 @@ def agent_run(task, max_steps, step_delay, verbose, safety_level,
         enable_ghost_overlay=ghost_overlay,
         ghost_overlay_timeout=ghost_overlay_timeout,
         ghost_overlay_backend=ghost_overlay_backend,
+        enable_ghost_approval_execution=ghost_approval_execution,
     )
     result = orch.run_task(task)
 

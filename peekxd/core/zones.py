@@ -24,6 +24,12 @@ class Zone(enum.Enum):
     DIRECT = "direct"     # Direct execution, minimal checks
 
 
+class GhostActionClassification(enum.Enum):
+    """Classification of GHOST actions for approval execution (V4)."""
+    HARD_BLOCKED_GHOST = "hard_blocked_ghost"   # Never executes, even with approval
+    APPROVABLE_GHOST = "approvable_ghost"       # May execute after explicit approval
+
+
 @dataclass
 class GhostPreviewResult:
     """Structured preview for ghost-mode actions."""
@@ -61,6 +67,23 @@ class GhostPreviewResult:
             else:
                 masked[k] = v
         return masked
+
+
+@dataclass
+class GhostApprovalDecision:
+    """V4 decision on whether a GHOST action can be executed after approval."""
+    classification: GhostActionClassification
+    can_execute_after_approval: bool
+    hard_block_reason: Optional[str] = None
+    approval_required: bool = True
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "classification": self.classification.value,
+            "can_execute_after_approval": self.can_execute_after_approval,
+            "hard_block_reason": self.hard_block_reason,
+            "approval_required": self.approval_required,
+        }
 
 
 @dataclass
@@ -284,6 +307,67 @@ class ZoneDecision:
                 pass
 
         return preview
+
+    @classmethod
+    def classify_ghost_action(
+        cls,
+        action: str,
+        params: Dict[str, Any],
+        risk_factors: List[str],
+        force_ghost: bool = False,
+    ) -> GhostApprovalDecision:
+        """Classify a GHOST action as HARD_BLOCKED or APPROVABLE (V4).
+
+        Safety rules:
+        - force_ghost=True -> ALWAYS hard-blocked
+        - Any risk factor at all -> hard-blocked
+        - Unknown actions -> hard-blocked
+        - Only known safe actions with ZERO risk factors -> approvable
+
+        Args:
+            action: Action name.
+            params: Action parameters.
+            risk_factors: Risk factors from zone decision.
+            force_ghost: Whether force_ghost CLI flag is active.
+
+        Returns:
+            GhostApprovalDecision with classification.
+        """
+        # force_ghost always hard-blocks
+        if force_ghost:
+            return GhostApprovalDecision(
+                classification=GhostActionClassification.HARD_BLOCKED_GHOST,
+                can_execute_after_approval=False,
+                hard_block_reason="force_ghost is active",
+                approval_required=True,
+            )
+
+        # Any risk factors -> hard-blocked (destructive, credential, protected path, system keys)
+        if risk_factors:
+            return GhostApprovalDecision(
+                classification=GhostActionClassification.HARD_BLOCKED_GHOST,
+                can_execute_after_approval=False,
+                hard_block_reason=f"Risk factors present: {', '.join(risk_factors)}",
+                approval_required=True,
+            )
+
+        # Unknown actions -> hard-blocked
+        approvable_actions = cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS
+        if action.strip().lower() not in approvable_actions:
+            return GhostApprovalDecision(
+                classification=GhostActionClassification.HARD_BLOCKED_GHOST,
+                can_execute_after_approval=False,
+                hard_block_reason=f"Action '{action}' is not in approvable set",
+                approval_required=True,
+            )
+
+        # Known safe action with zero risk factors -> approvable
+        return GhostApprovalDecision(
+            classification=GhostActionClassification.APPROVABLE_GHOST,
+            can_execute_after_approval=True,
+            hard_block_reason=None,
+            approval_required=True,
+        )
 
     @classmethod
     def _generate_preview_markup(

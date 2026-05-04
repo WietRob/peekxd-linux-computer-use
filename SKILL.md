@@ -69,6 +69,29 @@ Live overlay window for GHOST actions:
 - GHOST remains non-executing even if user approves. V3 is preview-only overlay.
 - Lazy imports: tkinter loaded only when overlay is shown.
 
+### Softbox V4 — Confirmable Ghost Actions (v0.3.4)
+Two-tier GHOST classification with conditional execution after overlay approval:
+
+**Routing Architecture:** APPROVABLE_GHOST is reached via SHADOW zone, NOT the GHOST zone.
+Safe actions (click, type) land in `Zone.SHADOW` via `ZoneDecision.decide()`. When both
+overlay and approval-execution flags are enabled, SHADOW actions route through an overlay
+confirmation flow instead of executing directly with before/after snapshots.
+
+- **HARD_BLOCKED_GHOST** — Never executes, regardless of approval. GHOST zone actions
+  (with risk factors) always hard-block.
+- **APPROVABLE_GHOST** — SHADOW-zone actions with `risk_factors=[]` that may execute
+  if the user approves via overlay.
+- **`--ghost-approval-execution`** CLI flag enables the SHADOW-to-confirmable routing.
+- Hard-blocked categories: destructive commands, credential input, protected paths,
+  system key combos, unknown actions.
+- Approvable categories: non-destructive SHADOW-zone actions (click, type, type_text)
+  with ZERO risk factors.
+
+```bash
+peekxd agent run "TASK" --ghost-overlay --ghost-approval-execution  # Approved safe SHADOW actions execute
+peekxd agent run "TASK" --ghost-overlay                              # SHADOW actions execute normally (V2 compat)
+```
+
 ```bash
 peekxd agent run "TASK" --ghost --ghost-overlay              # Force ghost + show overlay
 peekxd agent run "TASK" --ghost-overlay --ghost-overlay-timeout 10  # Custom timeout
@@ -81,15 +104,16 @@ peekxd safety zone click '{"x": 100, "y": 200}' # Returns SHADOW for safe clicks
 peekxd safety zone type '{"text": "hello"}'     # Returns SHADOW for safe typing
 ```
 
-Zone assignment (V2):
-| Action | Risk-Free Zone | With Risk Factors |
-|--------|---------------|-------------------|
-| type   | SHADOW        | GHOST             |
-| click  | SHADOW        | GHOST             |
-| scroll | DIRECT        | —                 |
-| capture_screen | DIRECT | GHOST (protected path) |
-| key/hotkey | DIRECT | GHOST (system combos) |
-| unknown action | GHOST | GHOST |
+Zone assignment (V2 → V4):
+|| Action | Risk-Free Zone | V4 Confirmable Routing | With Risk Factors ||
+||--------|---------------|------------------------|--------------------|
+|| click  | SHADOW        | APPROVABLE_GHOST (via SHADOW, if flags on + approved) | GHOST → HARD_BLOCKED_GHOST |
+|| type   | SHADOW        | APPROVABLE_GHOST (via SHADOW, if flags on + approved) | GHOST → HARD_BLOCKED_GHOST |
+|| type_text | SHADOW     | APPROVABLE_GHOST (via SHADOW, if flags on + approved) | GHOST → HARD_BLOCKED_GHOST |
+|| scroll | DIRECT        | —                      | — |
+|| capture_screen | DIRECT | — (not SHADOW)       | GHOST → HARD_BLOCKED_GHOST |
+|| key/hotkey | DIRECT    | — (not SHADOW)         | GHOST → HARD_BLOCKED_GHOST |
+|| unknown action | GHOST  | — (risk factors)     | GHOST → HARD_BLOCKED_GHOST ||
 
 Risk factors that trigger GHOST:
 - Destructive commands (rm, sudo, dd, mkfs, etc.)
@@ -344,6 +368,7 @@ peekxd mcp  # stdio mode for Claude Desktop, Cursor, etc.
 
 0.3.0 — Hermes Agent Edition with Safety, Memory, Audit, Cleanup
 +
+0.3.4 — Confirmable Ghost Actions (Softbox V4): Two-tier classification. APPROVABLE_GHOST reached via SHADOW zone routing (not GHOST zone). Approved safe SHADOW actions execute after overlay confirmation. Hard-blocked never do. New `--ghost-approval-execution` CLI flag.
 0.3.3 — Softbox Ghost Live Overlay V3: live overlay for GHOST actions with approve/cancel/timeout
 0.3.2 — Softbox Shadow Mode V2: before/after snapshots with shadow audit for normal actions
 +0.3.1 — Softbox Ghost Mode: risk-based zone system with preview-only safety

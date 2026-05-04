@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "peekxd-linux"
-version = "0.3.3"
+version = "0.3.4"
 description = "Linux automation that sees the screen and does the clicks"
 readme = "README.md"
 license = {text = "MIT"}

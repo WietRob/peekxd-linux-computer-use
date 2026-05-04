@@ -20,6 +20,7 @@ peekxd gives AI agents eyes and hands on Linux. Capture screenshots, analyze the
 | **Autonomous Loop** | **v0.3.0** | See-Think-Act with configurable steps |
 | **Softbox Shadow** | **v0.3.2** | Before/After Snapshots + Shadow Audit for normal actions |
 | **Softbox Ghost Live Overlay** | **v0.3.3** | Live overlay for GHOST actions with approve/cancel/timeout |
+| **Softbox V4 — Confirmable Ghost Actions** | **v0.3.4** | Two-tier classification; safe SHADOW actions execute after overlay approval; hard-blocked GHOST actions never do |
 | **Safety Guardrails** | **v0.3.0** | Strict/Normal/Permissive safety levels |
 | **Session Memory** | **v0.3.0** | Cached element positions across tasks |
 | **Audit Trail** | **v0.3.0** | Per-action logging with JSON export |
@@ -296,6 +297,7 @@ MIT
 
 ## Version
 
+0.3.4 — Confirmable Ghost Actions (Softbox V4): Two-tier classification. APPROVABLE_GHOST reached via SHADOW zone routing (not GHOST zone). Safe SHADOW actions execute after overlay approval. Hard-blocked never do. New `--ghost-approval-execution` CLI flag.
 0.3.3 — Softbox Ghost Live Overlay V3: live overlay for GHOST actions with approve/cancel/timeout
 0.3.2 — Softbox Shadow Mode V2: before/after snapshots with shadow audit for normal actions
 0.3.1 — Softbox Ghost Mode: risk-based zone system with preview-only safety
