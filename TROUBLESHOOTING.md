@@ -159,7 +159,14 @@ Some tiling window managers ignore resize requests. Use the WM's native commands
 
 ### "No vision provider available"
 
-Set at least one API key:
+Prefer Hermes Agent when available; peekxd then reuses Hermes' configured auxiliary vision backend and does not need its own API key:
+```bash
+# Optional if Hermes is not in the default location:
+export PEEKXD_HERMES_AGENT_DIR="$HOME/.hermes/hermes-agent"
+peekxd permissions
+```
+
+Fallback options are direct provider credentials or local Ollama:
 ```bash
 export OPENAI_API_KEY="sk-..."
 # or

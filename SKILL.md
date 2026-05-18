@@ -360,8 +360,10 @@ peekxd mcp  # stdio mode for Claude Desktop, Cursor, etc.
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | OpenAI Vision API |
-| `ANTHROPIC_API_KEY` | Anthropic Claude Vision |
+| `PEEKXD_HERMES_AGENT_DIR` | Optional path to Hermes Agent checkout for the default Hermes vision provider |
+| `HERMES_VISION_MODEL` | Optional Hermes auxiliary vision model override |
+| `OPENAI_API_KEY` | Direct OpenAI Vision API fallback |
+| `ANTHROPIC_API_KEY` | Direct Anthropic Claude Vision fallback |
 | `OLLAMA_HOST` | Ollama server URL |
 
 ## Version

@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import tempfile
+from pathlib import Path
 import unittest
 from abc import ABC
 from unittest.mock import MagicMock, patch, mock_open
@@ -13,6 +14,7 @@ from peekxd.vision.base import VisionProvider
 from peekxd.vision.openai import OpenAIVisionProvider, _encode_image
 from peekxd.vision.anthropic import AnthropicVisionProvider, _encode_image as _anthropic_encode_image
 from peekxd.vision.ollama import OllamaVisionProvider, _encode_image as _ollama_encode_image
+from peekxd.vision.hermes import HermesVisionProvider
 from peekxd.vision.detector import get_vision_provider
 
 
@@ -111,8 +113,15 @@ class TestOpenAIVisionProvider(unittest.TestCase):
     def test_available_with_key_no_package(self):
         """When key is present but package is not installed, available is False."""
         provider = OpenAIVisionProvider()
-        # openai package is not installed in this environment
-        self.assertFalse(provider.available)
+        real_import = __import__
+
+        def import_without_openai(name, *args, **kwargs):
+            if name == "openai":
+                raise ImportError("openai missing")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=import_without_openai):
+            self.assertFalse(provider.available)
 
     @patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}, clear=True)
     def test_analyze_success(self):
@@ -487,31 +496,70 @@ class TestOllamaVisionProvider(unittest.TestCase):
         self.assertEqual(result, "It is a dog.")
 
 
+class TestHermesVisionProvider(unittest.TestCase):
+    """Test Hermes native vision provider."""
+
+    def test_name(self):
+        self.assertEqual(HermesVisionProvider().name, "hermes")
+
+    @patch("peekxd.vision.hermes.HermesVisionProvider._hermes_agent_dir")
+    def test_available_when_hermes_vision_tools_exist(self, mock_dir):
+        mock_dir.return_value = Path("/tmp/hermes-agent")
+        with patch("pathlib.Path.is_file", return_value=True):
+            self.assertTrue(HermesVisionProvider().available)
+
+    @patch("peekxd.vision.hermes.HermesVisionProvider._call_hermes", return_value="Hermes says hello")
+    def test_analyze_uses_hermes_vision_tool(self, mock_call):
+        provider = HermesVisionProvider()
+        result = provider.analyze("/tmp/img.png", "Describe this")
+        self.assertEqual(result, "Hermes says hello")
+        mock_call.assert_called_once_with("/tmp/img.png", "Describe this")
+
+    @patch("peekxd.vision.hermes.HermesVisionProvider._call_hermes", return_value='```json\n{"x": 7, "y": 9}\n```')
+    def test_find_element_parses_coordinates(self, mock_call):
+        provider = HermesVisionProvider()
+        self.assertEqual(provider.find_element("/tmp/img.png", "the button"), (7, 9))
+
+    @patch("peekxd.vision.hermes.HermesVisionProvider._call_hermes", return_value='{"x": -1, "y": -1}')
+    def test_find_element_not_found(self, mock_call):
+        provider = HermesVisionProvider()
+        self.assertIsNone(provider.find_element("/tmp/img.png", "missing"))
+
+    @patch("peekxd.vision.hermes.HermesVisionProvider._call_hermes", return_value="42")
+    def test_answer_question_delegates_to_analyze(self, mock_call):
+        provider = HermesVisionProvider()
+        self.assertEqual(provider.answer_question("/tmp/img.png", "Answer?"), "42")
+
+
 class TestGetVisionProvider(unittest.TestCase):
     """Test the provider detector."""
 
+    @patch("peekxd.vision.detector.HermesVisionProvider")
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_specific_provider_available(self, mock_ollama, mock_anthropic, mock_openai):
+    def test_specific_provider_available(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
         """When a specific provider name is given and available, return it."""
         mock_instance = MagicMock()
         mock_instance.available = True
         mock_openai.return_value = mock_instance
+        mock_hermes.return_value = MagicMock(available=False)
         mock_anthropic.return_value = MagicMock(available=False)
         mock_ollama.return_value = MagicMock(available=False)
 
         result = get_vision_provider("openai")
         self.assertEqual(result, mock_instance)
 
+    @patch("peekxd.vision.detector.HermesVisionProvider")
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_specific_provider_unavailable(self, mock_ollama, mock_anthropic, mock_openai):
+    def test_specific_provider_unavailable(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
         """When a specific provider name is unavailable, raise."""
         mock_instance = MagicMock()
         mock_instance.available = False
         mock_openai.return_value = mock_instance
+        mock_hermes.return_value = MagicMock(available=False)
         mock_anthropic.return_value = MagicMock(available=False)
         mock_ollama.return_value = MagicMock(available=False)
 
@@ -519,31 +567,47 @@ class TestGetVisionProvider(unittest.TestCase):
             get_vision_provider("openai")
         self.assertIn("not available", str(ctx.exception))
 
+    @patch("peekxd.vision.detector.HermesVisionProvider")
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_auto_select_first_available(self, mock_ollama, mock_anthropic, mock_openai):
-        """Auto-select returns the first available provider."""
+    def test_auto_select_prefers_hermes(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
+        """Auto-select prefers Hermes when available."""
+        mock_hermes_instance = MagicMock()
+        mock_hermes_instance.available = True
+        mock_hermes.return_value = mock_hermes_instance
+        mock_openai.return_value = MagicMock(available=True)
+        mock_anthropic.return_value = MagicMock(available=True)
+        mock_ollama.return_value = MagicMock(available=True)
+
+        result = get_vision_provider()
+        self.assertEqual(result, mock_hermes_instance)
+
+    @patch("peekxd.vision.detector.HermesVisionProvider")
+    @patch("peekxd.vision.detector.OpenAIVisionProvider")
+    @patch("peekxd.vision.detector.AnthropicVisionProvider")
+    @patch("peekxd.vision.detector.OllamaVisionProvider")
+    def test_auto_select_falls_back_after_hermes(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
+        """Auto-select falls back to existing providers if Hermes is unavailable."""
+        mock_hermes.return_value = MagicMock(available=False)
         mock_openai_instance = MagicMock()
         mock_openai_instance.available = False
         mock_openai.return_value = mock_openai_instance
-
         mock_anthropic_instance = MagicMock()
         mock_anthropic_instance.available = True
         mock_anthropic.return_value = mock_anthropic_instance
-
-        mock_ollama_instance = MagicMock()
-        mock_ollama_instance.available = False
-        mock_ollama.return_value = mock_ollama_instance
+        mock_ollama.return_value = MagicMock(available=False)
 
         result = get_vision_provider()
         self.assertEqual(result, mock_anthropic_instance)
 
+    @patch("peekxd.vision.detector.HermesVisionProvider")
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_no_providers_available(self, mock_ollama, mock_anthropic, mock_openai):
+    def test_no_providers_available(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
         """When no provider is available, raise ProviderNotAvailableError."""
+        mock_hermes.return_value = MagicMock(available=False)
         mock_openai.return_value = MagicMock(available=False)
         mock_anthropic.return_value = MagicMock(available=False)
         mock_ollama.return_value = MagicMock(available=False)
@@ -552,11 +616,13 @@ class TestGetVisionProvider(unittest.TestCase):
             get_vision_provider()
         self.assertIn("No vision provider available", str(ctx.exception))
 
+    @patch("peekxd.vision.detector.HermesVisionProvider")
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_unknown_provider_name(self, mock_ollama, mock_anthropic, mock_openai):
+    def test_unknown_provider_name(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
         """An unknown provider name falls through to auto-selection."""
+        mock_hermes.return_value = MagicMock(available=False)
         mock_openai.return_value = MagicMock(available=False)
         mock_anthropic.return_value = MagicMock(available=False)
         mock_ollama.return_value = MagicMock(available=True)
@@ -574,9 +640,11 @@ class TestImports(unittest.TestCase):
             OpenAIVisionProvider,
             AnthropicVisionProvider,
             OllamaVisionProvider,
+            HermesVisionProvider,
             get_vision_provider,
         )
         self.assertTrue(issubclass(VisionProvider, ABC))
+        self.assertTrue(callable(HermesVisionProvider))
         self.assertTrue(callable(get_vision_provider))
 
 

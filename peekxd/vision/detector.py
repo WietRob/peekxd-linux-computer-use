@@ -8,6 +8,7 @@ from typing import Optional
 
 from peekxd.core.errors import ProviderNotAvailableError
 from peekxd.vision.base import VisionProvider
+from peekxd.vision.hermes import HermesVisionProvider
 from peekxd.vision.openai import OpenAIVisionProvider
 from peekxd.vision.anthropic import AnthropicVisionProvider
 from peekxd.vision.ollama import OllamaVisionProvider
@@ -32,6 +33,7 @@ def get_vision_provider(provider_name: Optional[str] = None) -> VisionProvider:
             available or no provider can be found.
     """
     providers = {
+        "hermes": HermesVisionProvider(),
         "openai": OpenAIVisionProvider(),
         "anthropic": AnthropicVisionProvider(),
         "ollama": OllamaVisionProvider(),
@@ -50,5 +52,6 @@ def get_vision_provider(provider_name: Optional[str] = None) -> VisionProvider:
 
     raise ProviderNotAvailableError(
         "No vision provider available. "
-        "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or ensure Ollama is running."
+        "Install/configure Hermes Agent, set OPENAI_API_KEY or ANTHROPIC_API_KEY, "
+        "or ensure Ollama is running."
     )

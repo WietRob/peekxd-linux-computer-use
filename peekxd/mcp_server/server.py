@@ -216,10 +216,10 @@ def main():
     mcp = create_mcp_server(config)
     transport = config.get("mcp.transport", "stdio")
     if transport == "stdio":
-        mcp.run(transport="stdio")
+        mcp.run(transport="stdio", show_banner=False)
     else:
         port = config.get("mcp.port", 3000)
-        mcp.run(transport="sse", port=port)
+        mcp.run(transport="sse", port=port, show_banner=False)
 
 
 if __name__ == "__main__":

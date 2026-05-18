@@ -222,3 +222,15 @@ class TestCLI:
         assert "Inspection:" in result.output
         assert "Window:" in result.output
         assert "Vision:" in result.output
+
+    def test_permissions_reports_individual_failures(self, mock_submodules, runner):
+        """permissions keeps checking when one provider raises."""
+        mod = sys.modules["peekxd.screenshot"]
+        setattr(mod, "get_screenshot_provider", MagicMock(side_effect=RuntimeError("no display")))
+
+        result = runner.invoke(cli, ["permissions"])
+
+        assert result.exit_code == 0
+        assert "Screenshot: FAIL (no display)" in result.output
+        assert "Input:" in result.output
+        assert "Vision:" in result.output

@@ -13,7 +13,7 @@ peekxd gives AI agents eyes and hands on Linux. Capture screenshots, analyze the
 | Input | Ready | Mouse move, click, type, hotkey, scroll, drag |
 | Inspection | Ready | UI element tree via AT-SPI2 |
 | Window | Ready | List, focus, move, resize, close windows |
-| Vision | Ready | OpenAI, Anthropic, Ollama providers |
+| Vision | Ready | Hermes Agent, OpenAI, Anthropic, Ollama providers |
 | MCP Server | Ready | 18 tools for AI assistants |
 | CLI | Ready | Full command-line interface |
 | **Agent Markup** | **v0.3.0** | AI-powered bounding box detection |
@@ -35,7 +35,7 @@ peekxd/
 ├── input/          # xdotool (X11), ydotool (Wayland)
 ├── inspection/     # AT-SPI2 accessibility
 ├── window/         # xdotool/wlrctl window management
-├── vision/         # OpenAI, Anthropic, Ollama
+├── vision/         # Hermes Agent, OpenAI, Anthropic, Ollama
 ├── agent/          # Orchestrator, actions, markup, memory, function calling, Hermes tools
 ├── mcp_server/     # FastMCP server (18 tools)
 ├── config/         # JSON configuration
@@ -137,6 +137,14 @@ peekxd config get vision.default_provider
 Config location: `~/.config/peekxd/config.json`
 
 ### Vision Providers
+
+**Hermes Agent (default, no extra API key for peekxd):**
+```bash
+# Uses Hermes Agent's configured auxiliary vision backend.
+# Optional when Hermes is installed outside ~/.hermes/hermes-agent:
+export PEEKXD_HERMES_AGENT_DIR="$HOME/.hermes/hermes-agent"
+peekxd analyze screenshot.png "Describe this screen"
+```
 
 **OpenAI:**
 ```bash

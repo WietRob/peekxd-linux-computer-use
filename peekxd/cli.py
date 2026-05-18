@@ -292,13 +292,20 @@ def permissions():
     from .window import get_window_provider
     from .vision import get_vision_provider
 
+    def _status(label, check):
+        try:
+            value = check()
+            return (label, "OK" if value else "FAIL")
+        except Exception as exc:
+            return (label, f"FAIL ({exc})")
+
     checks = [
         ("Desktop", f"{detect_desktop().value}"),
-        ("Screenshot", "OK" if get_screenshot_provider() else "FAIL"),
-        ("Input", "OK" if get_input_provider() else "FAIL"),
-        ("Inspection", "OK" if get_inspection_provider() else "FAIL"),
-        ("Window", "OK" if get_window_provider() else "FAIL"),
-        ("Vision", "OK" if get_vision_provider() else "FAIL"),
+        _status("Screenshot", get_screenshot_provider),
+        _status("Input", get_input_provider),
+        _status("Inspection", get_inspection_provider),
+        _status("Window", get_window_provider),
+        _status("Vision", get_vision_provider),
     ]
     for name, status in checks:
         click.echo(f"  {name}: {status}")
@@ -313,9 +320,9 @@ def mcp(port, transport):
     config = ConfigManager()
     server = create_mcp_server(config)
     if transport == "stdio":
-        server.run(transport="stdio")
+        server.run(transport="stdio", show_banner=False)
     else:
-        server.run(transport="sse", port=port)
+        server.run(transport="sse", port=port, show_banner=False)
 
 
 @cli.group()
