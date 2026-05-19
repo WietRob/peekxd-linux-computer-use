@@ -295,7 +295,12 @@ def permissions():
     def _status(label, check):
         try:
             value = check()
-            return (label, "OK" if value else "FAIL")
+            if not value:
+                return (label, "FAIL")
+            provider_label = getattr(value, "permission_label", None)
+            if provider_label:
+                return (label, f"OK ({provider_label})")
+            return (label, "OK")
         except Exception as exc:
             return (label, f"FAIL ({exc})")
 

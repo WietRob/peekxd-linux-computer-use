@@ -234,3 +234,13 @@ class TestCLI:
         assert "Screenshot: FAIL (no display)" in result.output
         assert "Input:" in result.output
         assert "Vision:" in result.output
+
+    def test_permissions_shows_provider_label(self, mock_submodules, runner):
+        """permissions shows the screenshot provider label when available."""
+        provider = mock_submodules["peekxd.screenshot"]
+        provider.permission_label = "wslg/windows-host"
+
+        result = runner.invoke(cli, ["permissions"])
+
+        assert result.exit_code == 0
+        assert "Screenshot: OK (wslg/windows-host)" in result.output
