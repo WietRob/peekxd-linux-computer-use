@@ -37,14 +37,38 @@ sudo pacman -S xdotool imagemagick grim ydotool python-atspi
 Install at least one of:
 - **X11**: `imagemagick` (provides `import` command)
 - **Wayland**: `grim`
+- **WSLg**: `powershell.exe` and `wslpath` available from WSL (auto-detected)
 - **Generic**: `spectacle`, `flameshot`, or `gnome-screenshot`
 
 Verify:
 ```bash
 which import    # X11
 which grim      # Wayland
+which powershell.exe wslpath  # WSLg fallback
 which spectacle # Generic
 ```
+
+### WSLg root capture fails with BadMatch / Resource temporarily unavailable
+
+WSLg can expose both `DISPLAY` and `WAYLAND_DISPLAY`, while X11 root capture
+via ImageMagick `import -window root` or `xwd -root` fails at runtime with:
+
+```text
+BadMatch (invalid parameter attributes)
+unable to read X window image `root': Resource temporarily unavailable
+```
+
+peekxd includes a WSLg fallback provider that captures the actual Windows host
+desktop through PowerShell/.NET (`System.Drawing.CopyFromScreen`). Verify it
+with:
+
+```bash
+peekxd permissions
+peekxd capture screen -o /tmp/peekxd-wslg.png
+```
+
+Expected permissions output in WSLg is `Screenshot: OK` even if native Wayland
+tools such as `grim` are not installed.
 
 ### Black screenshots
 

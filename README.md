@@ -9,7 +9,7 @@ peekxd gives AI agents eyes and hands on Linux. Capture screenshots, analyze the
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| Screenshot | Ready | Full screen, window, region capture (X11 + Wayland) |
+| Screenshot | Ready | Full screen, window, region capture (X11, Wayland, WSLg/Windows host fallback) |
 | Input | Ready | Mouse move, click, type, hotkey, scroll, drag |
 | Inspection | Ready | UI element tree via AT-SPI2 |
 | Window | Ready | List, focus, move, resize, close windows |
@@ -31,7 +31,7 @@ peekxd gives AI agents eyes and hands on Linux. Capture screenshots, analyze the
 ```
 peekxd/
 ├── core/           # Desktop detection, errors, utilities, safety, cleanup, audit
-├── screenshot/     # X11, Wayland, Generic providers
+├── screenshot/     # X11, Wayland, WSLg/Windows host, Generic providers
 ├── input/          # xdotool (X11), ydotool (Wayland)
 ├── inspection/     # AT-SPI2 accessibility
 ├── window/         # xdotool/wlrctl window management
@@ -50,6 +50,7 @@ peekxd/
 - Python 3.10+
 - For X11: `xdotool`, `imagemagick`
 - For Wayland: `grim`, `ydotool`
+- For WSLg: Windows `powershell.exe` + WSL `wslpath` are auto-detected for host-desktop capture
 
 **Optional:**
 - `spectacle` or `flameshot` (alternative screenshot)
@@ -73,6 +74,10 @@ pip install -e ".[all]"
 # 4. Verify
 peekxd permissions
 ```
+
+On WSLg, peekxd prefers the Windows host capture provider. This avoids WSLg
+root-window failures from ImageMagick/xwd such as `BadMatch` or
+`unable to read X window image root: Resource temporarily unavailable`.
 
 ## Quick Start
 

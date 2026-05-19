@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -12,6 +12,7 @@ from peekxd.screenshot import (
     GenericProvider,
     ScreenshotProvider,
     WaylandProvider,
+    WindowsWslProvider,
     X11Provider,
     get_screenshot_provider,
 )
@@ -95,6 +96,24 @@ class TestProviderAvailability:
         provider = GenericProvider()
         assert provider.available is False
 
+    @patch("peekxd.screenshot.windows_wsl.executable_available")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider._is_wsl")
+    def test_windows_wsl_available_in_wsl_with_powershell(self, mock_is_wsl, mock_exec):
+        """WindowsWslProvider.available is True in WSL with powershell.exe and wslpath."""
+        mock_is_wsl.return_value = True
+        mock_exec.side_effect = lambda name: name in ("powershell.exe", "wslpath")
+        provider = WindowsWslProvider()
+        assert provider.available is True
+
+    @patch("peekxd.screenshot.windows_wsl.executable_available")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider._is_wsl")
+    def test_windows_wsl_not_available_outside_wsl(self, mock_is_wsl, mock_exec):
+        """WindowsWslProvider.available is False outside WSL."""
+        mock_is_wsl.return_value = False
+        mock_exec.return_value = True
+        provider = WindowsWslProvider()
+        assert provider.available is False
+
 
 # ---------------------------------------------------------------------------
 # get_screenshot_provider detection tests
@@ -104,43 +123,60 @@ class TestGetScreenshotProvider:
     """Test auto-detection of the best screenshot provider."""
 
     @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_detects_x11_provider_on_x11(self, mock_exec, mock_desktop):
+    def test_detects_x11_provider_on_x11(self, mock_exec, mock_wsl_available, mock_desktop):
         """When on X11 with import available, returns X11Provider."""
         mock_desktop.return_value = DesktopEnvironment.X11
+        mock_wsl_available.return_value = False
         mock_exec.return_value = True  # import available
         provider = get_screenshot_provider()
         assert isinstance(provider, X11Provider)
 
     @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
     @patch("peekxd.screenshot.wayland.executable_available")
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_detects_wayland_provider_on_wayland(self, mock_x11, mock_wl, mock_desktop):
+    def test_detects_wayland_provider_on_wayland(self, mock_x11, mock_wl, mock_wsl_available, mock_desktop):
         """When on Wayland with grim available, returns WaylandProvider."""
         mock_desktop.return_value = DesktopEnvironment.WAYLAND
+        mock_wsl_available.return_value = False
         mock_x11.return_value = False
         mock_wl.side_effect = lambda name: name == "grim"
         provider = get_screenshot_provider()
         assert isinstance(provider, WaylandProvider)
 
     @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
+    def test_prefers_windows_wsl_provider_in_wslg(self, mock_wsl_available, mock_desktop):
+        """WSLg prefers Windows host capture over advertised Wayland/X11 paths."""
+        mock_desktop.return_value = DesktopEnvironment.WAYLAND
+        mock_wsl_available.return_value = True
+        provider = get_screenshot_provider()
+        assert isinstance(provider, WindowsWslProvider)
+
+    @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
     @patch("peekxd.screenshot.generic.executable_available")
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_falls_back_to_generic_on_x11(self, mock_x11, mock_gen, mock_desktop):
+    def test_falls_back_to_generic_on_x11(self, mock_x11, mock_gen, mock_wsl_available, mock_desktop):
         """When on X11 with no X11 tools, falls back to GenericProvider."""
         mock_desktop.return_value = DesktopEnvironment.X11
+        mock_wsl_available.return_value = False
         mock_x11.return_value = False  # no import or xwd
         mock_gen.side_effect = lambda name: name == "spectacle"
         provider = get_screenshot_provider()
         assert isinstance(provider, GenericProvider)
 
     @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
     @patch("peekxd.screenshot.generic.executable_available")
     @patch("peekxd.screenshot.wayland.executable_available")
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_unknown_desktop_tries_all_providers(self, mock_x11, mock_wl, mock_gen, mock_desktop):
+    def test_unknown_desktop_tries_all_providers(self, mock_x11, mock_wl, mock_gen, mock_wsl_available, mock_desktop):
         """When desktop is unknown, tries all providers in order."""
         mock_desktop.return_value = DesktopEnvironment.UNKNOWN
+        mock_wsl_available.return_value = False
         mock_x11.return_value = False
         mock_wl.return_value = False
         mock_gen.side_effect = lambda name: name == "flameshot"
@@ -148,12 +184,14 @@ class TestGetScreenshotProvider:
         assert isinstance(provider, GenericProvider)
 
     @patch("peekxd.screenshot.detector.detect_desktop")
+    @patch("peekxd.screenshot.windows_wsl.WindowsWslProvider.available", new_callable=PropertyMock)
     @patch("peekxd.screenshot.generic.executable_available")
     @patch("peekxd.screenshot.wayland.executable_available")
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_raises_when_no_provider_available(self, mock_x11, mock_wl, mock_gen, mock_desktop):
+    def test_raises_when_no_provider_available(self, mock_x11, mock_wl, mock_gen, mock_wsl_available, mock_desktop):
         """When no tools are available, raises ProviderNotAvailableError."""
         mock_desktop.return_value = DesktopEnvironment.UNKNOWN
+        mock_wsl_available.return_value = False
         mock_x11.return_value = False
         mock_wl.return_value = False
         mock_gen.return_value = False
