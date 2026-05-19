@@ -23,15 +23,22 @@ class WaylandProvider(ScreenshotProvider):
         The *display* argument is accepted for API compatibility but is
         ignored by both underlying tools.
         """
+        errors = []
         if executable_available("grim"):
-            run_command(["grim", output_path])
-        elif executable_available("wayshot"):
-            run_command(["wayshot", "-f", output_path])
-        else:
-            raise ScreenshotError(
-                "No Wayland capture tool available. Install grim or wayshot.",
-            )
-        return output_path
+            try:
+                run_command(["grim", output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"grim: {exc}")
+        if executable_available("wayshot"):
+            try:
+                run_command(["wayshot", "-f", output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"wayshot: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError("No working Wayland capture tool available. Install/fix grim or wayshot." + detail)
 
     def capture_window(self, output_path: str, window_id: Optional[str] = None) -> str:
         """Capture a specific Wayland window or the active window.
@@ -55,32 +62,46 @@ class WaylandProvider(ScreenshotProvider):
 
         geo_str = f"{geometry['x']},{geometry['y']} {geometry['width']}x{geometry['height']}"
 
+        errors = []
         if executable_available("grim"):
-            run_command(["grim", "-g", geo_str, output_path])
-        elif executable_available("wayshot"):
-            run_command([
-                "wayshot", "-f", output_path,
-                "-s", geo_str,
-            ])
-        else:
-            raise ScreenshotError(
-                "No Wayland capture tool available. Install grim or wayshot.",
-            )
-        return output_path
+            try:
+                run_command(["grim", "-g", geo_str, output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"grim: {exc}")
+        if executable_available("wayshot"):
+            try:
+                run_command([
+                    "wayshot", "-f", output_path,
+                    "-s", geo_str,
+                ])
+                return output_path
+            except Exception as exc:
+                errors.append(f"wayshot: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError("No working Wayland capture tool available. Install/fix grim or wayshot." + detail)
 
     def capture_region(self, output_path: str, x: int, y: int, width: int, height: int) -> str:
         """Capture a rectangular region of the Wayland screen."""
         geo_str = f"{x},{y} {width}x{height}"
 
+        errors = []
         if executable_available("grim"):
-            run_command(["grim", "-g", geo_str, output_path])
-        elif executable_available("wayshot"):
-            run_command(["wayshot", "-f", output_path, "-s", geo_str])
-        else:
-            raise ScreenshotError(
-                "No Wayland capture tool available. Install grim or wayshot.",
-            )
-        return output_path
+            try:
+                run_command(["grim", "-g", geo_str, output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"grim: {exc}")
+        if executable_available("wayshot"):
+            try:
+                run_command(["wayshot", "-f", output_path, "-s", geo_str])
+                return output_path
+            except Exception as exc:
+                errors.append(f"wayshot: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError("No working Wayland capture tool available. Install/fix grim or wayshot." + detail)
 
     # ------------------------------------------------------------------
     # Window / screen introspection

@@ -34,11 +34,18 @@ class TestProviderAvailability:
         assert provider.available is True
 
     @patch("peekxd.screenshot.x11.executable_available")
-    def test_x11_available_with_xwd(self, mock_exec):
-        """X11Provider.available is True when xwd exists."""
-        mock_exec.side_effect = lambda name: name == "xwd"
+    def test_x11_available_with_xwd_and_convert(self, mock_exec):
+        """X11Provider.available is True when the full xwd + convert chain exists."""
+        mock_exec.side_effect = lambda name: name in ("xwd", "convert")
         provider = X11Provider()
         assert provider.available is True
+
+    @patch("peekxd.screenshot.x11.executable_available")
+    def test_x11_not_available_with_xwd_without_convert(self, mock_exec):
+        """A bare xwd binary is not enough because PNG conversion would fail."""
+        mock_exec.side_effect = lambda name: name == "xwd"
+        provider = X11Provider()
+        assert provider.available is False
 
     @patch("peekxd.screenshot.x11.executable_available")
     def test_x11_not_available(self, mock_exec):
@@ -222,6 +229,21 @@ class TestX11Capture:
 
     @patch("peekxd.screenshot.x11.executable_available")
     @patch("peekxd.screenshot.x11.run_command")
+    def test_capture_screen_falls_back_to_xwd_when_import_fails(self, mock_run, mock_exec, tmp_path):
+        """X11 capture is tool-agnostic: a broken import binary does not block xwd+convert."""
+        output = str(tmp_path / "test.png")
+        mock_exec.side_effect = lambda name: name in ("import", "xwd", "convert")
+        mock_run.side_effect = [RuntimeError("import cannot read root"), MagicMock(), MagicMock()]
+
+        result = X11Provider().capture_screen(output, display=0)
+
+        assert result == output
+        assert mock_run.call_args_list[0].args[0] == ["import", "-window", "root", "-display", ":0", output]
+        assert mock_run.call_args_list[1].args[0][0:4] == ["xwd", "-root", "-display", ":0"]
+        assert mock_run.call_args_list[2].args[0] == ["convert", "/tmp/peekxd_screen.xwd", output]
+
+    @patch("peekxd.screenshot.x11.executable_available")
+    @patch("peekxd.screenshot.x11.run_command")
     def test_capture_window_with_window_id(self, mock_run, mock_exec):
         """capture_window uses given window_id."""
         mock_exec.side_effect = lambda name: name in ("import", "xrandr")
@@ -271,6 +293,19 @@ class TestWaylandCapture:
         result = provider.capture_screen("/tmp/test.png")
         assert result == "/tmp/test.png"
         mock_run.assert_any_call(["grim", "/tmp/test.png"])
+
+    @patch("peekxd.screenshot.wayland.executable_available")
+    @patch("peekxd.screenshot.wayland.run_command")
+    def test_capture_screen_falls_back_to_wayshot_when_grim_fails(self, mock_run, mock_exec):
+        """Wayland capture is compositor/tool agnostic when multiple tools exist."""
+        mock_exec.side_effect = lambda name: name in ("grim", "wayshot")
+        mock_run.side_effect = [RuntimeError("grim unsupported compositor"), MagicMock(stdout="", stderr="", returncode=0)]
+
+        result = WaylandProvider().capture_screen("/tmp/test.png")
+
+        assert result == "/tmp/test.png"
+        assert mock_run.call_args_list[0].args[0] == ["grim", "/tmp/test.png"]
+        assert mock_run.call_args_list[1].args[0] == ["wayshot", "-f", "/tmp/test.png"]
 
     @patch("peekxd.screenshot.wayland.executable_available")
     @patch("peekxd.screenshot.wayland.run_command")

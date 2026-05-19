@@ -22,24 +22,27 @@ class X11Provider(ScreenshotProvider):
         Uses ImageMagick's ``import`` if available, falling back to
         ``xwd`` piped through ``convert``.
         """
+        errors = []
         if executable_available("import"):
-            run_command(["import", "-window", "root", "-display", f":{display}", output_path])
-        elif executable_available("xwd") and executable_available("convert"):
-            run_command(
-                ["xwd", "-root", "-display", f":{display}"],
-                capture_output=True,
-                check=True,
-            )
-            run_command(
-                ["convert", "xwd:-", output_path],
-                capture_output=True,
-                check=True,
-            )
-        else:
-            raise ScreenshotError(
-                "No X11 capture tool available. Install ImageMagick (import) or xwd + convert.",
-            )
-        return output_path
+            try:
+                run_command(["import", "-window", "root", "-display", f":{display}", output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"import: {exc}")
+        if executable_available("xwd") and executable_available("convert"):
+            try:
+                tmp_xwd = "/tmp/peekxd_screen.xwd"
+                run_command(["xwd", "-root", "-display", f":{display}", "-out", tmp_xwd], check=True)
+                run_command(["convert", tmp_xwd, output_path], check=True)
+                return output_path
+            except Exception as exc:
+                errors.append(f"xwd+convert: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError(
+            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
+            + detail,
+        )
 
     def capture_window(self, output_path: str, window_id: Optional[str] = None) -> str:
         """Capture a specific X11 window or the active window."""
@@ -48,33 +51,53 @@ class X11Provider(ScreenshotProvider):
             if window_id is None:
                 raise ScreenshotError("Could not determine active window ID.")
 
+        errors = []
         if executable_available("import"):
-            run_command(["import", "-window", window_id, output_path])
-        elif executable_available("xwd") and executable_available("convert"):
-            run_command(["xwd", "-id", window_id, "-out", "/tmp/x11_window.xwd"])
-            run_command(["convert", "/tmp/x11_window.xwd", output_path])
-        else:
-            raise ScreenshotError(
-                "No X11 capture tool available. Install ImageMagick (import) or xwd + convert.",
-            )
-        return output_path
+            try:
+                run_command(["import", "-window", window_id, output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"import: {exc}")
+        if executable_available("xwd") and executable_available("convert"):
+            try:
+                run_command(["xwd", "-id", window_id, "-out", "/tmp/x11_window.xwd"], check=True)
+                run_command(["convert", "/tmp/x11_window.xwd", output_path], check=True)
+                return output_path
+            except Exception as exc:
+                errors.append(f"xwd+convert: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError(
+            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
+            + detail,
+        )
 
     def capture_region(self, output_path: str, x: int, y: int, width: int, height: int) -> str:
         """Capture a rectangular region of the X11 screen."""
+        errors = []
         if executable_available("import"):
-            run_command(["import", "-crop", f"{width}x{height}+{x}+{y}", output_path])
-        elif executable_available("xwd") and executable_available("convert"):
-            run_command(["xwd", "-root", "-out", "/tmp/x11_region.xwd"])
-            run_command([
-                "convert", "/tmp/x11_region.xwd",
-                "-crop", f"{width}x{height}+{x}+{y}",
-                output_path,
-            ])
-        else:
-            raise ScreenshotError(
-                "No X11 capture tool available. Install ImageMagick (import) or xwd + convert.",
-            )
-        return output_path
+            try:
+                run_command(["import", "-crop", f"{width}x{height}+{x}+{y}", output_path])
+                return output_path
+            except Exception as exc:
+                errors.append(f"import: {exc}")
+        if executable_available("xwd") and executable_available("convert"):
+            try:
+                run_command(["xwd", "-root", "-out", "/tmp/x11_region.xwd"], check=True)
+                run_command([
+                    "convert", "/tmp/x11_region.xwd",
+                    "-crop", f"{width}x{height}+{x}+{y}",
+                    output_path,
+                ], check=True)
+                return output_path
+            except Exception as exc:
+                errors.append(f"xwd+convert: {exc}")
+
+        detail = f" Tried: {'; '.join(errors)}" if errors else ""
+        raise ScreenshotError(
+            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
+            + detail,
+        )
 
     # ------------------------------------------------------------------
     # Window / screen introspection
@@ -133,8 +156,8 @@ class X11Provider(ScreenshotProvider):
 
     @property
     def available(self) -> bool:
-        """True if either ImageMagick ``import`` or ``xwd`` is installed."""
-        return executable_available("import") or executable_available("xwd")
+        """True if ImageMagick ``import`` or the full ``xwd`` + ``convert`` chain is installed."""
+        return executable_available("import") or (executable_available("xwd") and executable_available("convert"))
 
     # ------------------------------------------------------------------
     # Helpers
