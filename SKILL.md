@@ -26,6 +26,27 @@ pip install -e ".[all]"
 
 ## Quick Start for Agents
 
+### 0. Run Compatibility Doctor (Required before Gateway/Kanban)
+
+```bash
+peekxd doctor
+peekxd doctor --json
+peekxd doctor --smoke
+peekxd doctor --capability screenshot --smoke
+peekxd compatibility --json
+```
+
+Doctor checks are split by capability: desktop/session, screenshot/capture, input,
+window, inspection, vision, and MCP. JSON output is the preferred Hermes/Kanban
+input because every check has: `capability`, `status`, `provider`, `message`,
+`evidence`, `fix_hint`, and `smoke_tested`.
+
+Use this before any Gateway restart. `--smoke` validates real screenshot PNG output
+without clicking or typing; window and inspection smoke checks are read-only. Binary
+presence is not enough: X11 `import` can fail and must fall back to `xwd+convert`,
+Wayland `grim` can fail and must fall back to `wayshot`, and WSLg should prefer the
+`wslg/windows-host` provider.
+
 ### 1. Mark Elements (Most Powerful)
 
 ```bash

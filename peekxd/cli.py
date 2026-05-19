@@ -7,6 +7,7 @@ from pathlib import Path
 import click
 
 from .core import detect_desktop, is_x11, is_wayland, peekxdError
+from .core.doctor import run_doctor
 from .config import ConfigManager
 
 
@@ -314,6 +315,54 @@ def permissions():
     ]
     for name, status in checks:
         click.echo(f"  {name}: {status}")
+
+
+def _format_doctor_text(result):
+    """Format doctor result as compact terminal text."""
+    lines = []
+    for check in result.checks:
+        line = f"{check.capability}: {check.status.value} via {check.provider}"
+        if check.smoke_tested:
+            dims = check.evidence.get("dimensions")
+            mode = check.evidence.get("mode")
+            if dims and mode:
+                line += f" smoke={dims} {mode}"
+            else:
+                line += " smoke=true"
+        if check.message:
+            line += f" — {check.message}"
+        if check.fix_hint and check.status.value in ("WARN", "BLOCKED", "UNKNOWN"):
+            line += f" fix={check.fix_hint}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+@cli.command(name="doctor")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
+@click.option("--smoke", is_flag=True, help="Run safe runtime smoke checks")
+@click.option("--capability", type=click.Choice(["desktop", "screenshot", "capture", "input", "window", "inspection", "vision", "mcp"]), help="Check one capability")
+def doctor(as_json, smoke, capability):
+    """Diagnose Linux/WSL compatibility by capability."""
+    import json as json_module
+
+    result = run_doctor(capability=capability, smoke=smoke)
+    if as_json:
+        click.echo(json_module.dumps(result.to_dict(), sort_keys=True))
+    else:
+        click.echo(_format_doctor_text(result))
+
+
+@cli.command(name="compatibility")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON")
+def compatibility(as_json):
+    """Show compatibility matrix without active smoke checks."""
+    import json as json_module
+
+    result = run_doctor(smoke=False)
+    if as_json:
+        click.echo(json_module.dumps(result.to_dict(), sort_keys=True))
+    else:
+        click.echo(_format_doctor_text(result))
 
 
 @cli.command()

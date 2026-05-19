@@ -79,6 +79,59 @@ On WSLg, peekxd prefers the Windows host capture provider. This avoids WSLg
 root-window failures from ImageMagick/xwd such as `BadMatch` or
 `unable to read X window image root: Resource temporarily unavailable`.
 
+## Compatibility Doctor
+
+Before wiring peekxd into Hermes Gateway, Kanban workers, or any autonomous loop,
+run the compatibility doctor. It reports each capability independently instead of
+assuming that a binary on PATH means the desktop integration actually works.
+
+```bash
+peekxd doctor
+peekxd doctor --json
+peekxd doctor --smoke
+peekxd doctor --capability screenshot --smoke
+peekxd compatibility --json
+```
+
+Capabilities checked:
+
+| Capability | Default check | `--smoke` behavior |
+|------------|---------------|--------------------|
+| desktop | Detects X11/Wayland/WSL env flags | same |
+| screenshot | Provider discovery + tool evidence | Captures `/tmp/peekxd-doctor-screenshot-smoke.png`, validates PNG dimensions/mode |
+| input | Provider discovery only | never clicks/types/moves |
+| window | Provider discovery only | read-only `list_windows()` |
+| inspection | AT-SPI provider discovery | read-only UI tree query |
+| vision | Provider discovery | tiny generated image analysis |
+| mcp | FastMCP importability | creates the MCP server object without restarting Gateway |
+
+Example text output:
+
+```text
+screenshot: OK via wslg/windows-host smoke=1280x720 RGBA
+input: OK via X11InputProvider — Input provider detected via X11InputProvider; no click/type smoke performed
+window: OK via X11WindowProvider
+inspection: WARN via ATSPIProvider — AT-SPI provider exists but tree is empty or inaccessible
+vision: OK via hermes
+mcp: OK via fastmcp
+```
+
+JSON output is machine-readable for Hermes/Kanban and has this shape:
+
+```json
+{"checks":[{"capability":"screenshot","status":"OK","provider":"wslg/windows-host","message":"...","evidence":{"dimensions":"1280x720","mode":"RGBA"},"fix_hint":"","smoke_tested":true}]}
+```
+
+Compatibility matrix notes:
+
+- WSLg: prefer `wslg/windows-host` capture via `powershell.exe` + `wslpath`.
+- X11: `import` may exist but fail at runtime; fallback to `xwd+convert` is required.
+- Wayland: `grim` may exist but fail on unsupported compositors; fallback to `wayshot` where available.
+- GNOME/KDE: generic tools (`gnome-screenshot`, `spectacle`, `flameshot`) can help, but interactive region tools are not a substitute for smoke-tested full-screen capture.
+- Headless: expect capture/window/inspection to be `BLOCKED` or `WARN`; use JSON output to route workers away from desktop tasks.
+
+Rule of thumb: binary exists is not enough. Use `peekxd doctor --smoke` before any Gateway restart or Kanban rollout.
+
 ## Quick Start
 
 ```bash

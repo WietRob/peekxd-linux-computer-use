@@ -30,6 +30,31 @@ sudo pacman -S xdotool imagemagick grim ydotool python-atspi
 
 ---
 
+## Compatibility Doctor First
+
+Run the doctor before debugging individual providers or restarting Hermes Gateway:
+
+```bash
+peekxd doctor
+peekxd doctor --json
+peekxd doctor --smoke
+peekxd doctor --capability screenshot --smoke
+peekxd compatibility --json
+```
+
+Statuses are machine-readable: `OK`, `WARN`, `BLOCKED`, `SKIPPED`, `UNKNOWN`.
+Each check includes `capability`, `provider`, `message`, `evidence`, `fix_hint`, and
+`smoke_tested`.
+
+Important rules:
+
+- Binary presence is not proof. `import`, `grim`, or `xdotool` can exist and still fail in the active session.
+- `--smoke` is safe: screenshot writes to `/tmp`; input never clicks/types; window/inspection checks are read-only.
+- Use JSON output for Hermes/Kanban routing so workers can skip blocked desktop capabilities.
+- For Gateway decisions, require at least `peekxd doctor --capability screenshot --smoke` and `hermes mcp test peekxd`.
+
+---
+
 ## Screenshot Issues
 
 ### "No screenshot provider available"
