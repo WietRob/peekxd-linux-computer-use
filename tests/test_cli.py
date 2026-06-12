@@ -185,32 +185,38 @@ class TestCLI:
         assert "Resized window 0x01 to 800x600" in result.output
         provider.resize_window.assert_called_once_with("0x01", 800, 600)
 
-    def test_capture_screen(self, mock_submodules, runner):
-        """capture screen command takes a screenshot."""
+    def test_see_without_subcommand_does_not_invoke_screenshot_provider(self, runner):
+        """`peekxd see` defaults to help/usage and should not capture."""
+        with patch("peekxd.screenshot.get_screenshot_provider") as mock_get_screenshot:
+            result = runner.invoke(cli, ["see", "--help"])
+
+        assert result.exit_code == 0
+        assert "See and analyze the screen" in result.output
+        mock_get_screenshot.assert_not_called()
+
+    def test_capture_screen_removed(self, mock_submodules, runner):
+        """capture screen is removed and does not call screenshot provider."""
         provider = mock_submodules["peekxd.screenshot"]
-        provider.capture_screen.return_value = "/tmp/test.png"
         result = runner.invoke(cli, ["capture", "screen", "-o", "/tmp/test.png"])
-        assert result.exit_code == 0
-        assert "Saved" in result.output
-        provider.capture_screen.assert_called_once()
+        assert result.exit_code != 0
+        assert "Visible screenshot capture is removed" in result.output
+        provider.capture_screen.assert_not_called()
 
-    def test_capture_window(self, mock_submodules, runner):
-        """capture window command takes a window screenshot."""
+    def test_capture_window_removed(self, mock_submodules, runner):
+        """capture window is removed and does not call screenshot provider."""
         provider = mock_submodules["peekxd.screenshot"]
-        provider.capture_window.return_value = "/tmp/win.png"
         result = runner.invoke(cli, ["capture", "window", "--id", "0x01"])
-        assert result.exit_code == 0
-        assert "Saved" in result.output
-        provider.capture_window.assert_called_once()
+        assert result.exit_code != 0
+        assert "Visible screenshot capture is removed" in result.output
+        provider.capture_window.assert_not_called()
 
-    def test_capture_region(self, mock_submodules, runner):
-        """capture region command captures a region."""
+    def test_capture_region_removed(self, mock_submodules, runner):
+        """capture region is removed and does not call screenshot provider."""
         provider = mock_submodules["peekxd.screenshot"]
-        provider.capture_region.return_value = "/tmp/region.png"
         result = runner.invoke(cli, ["capture", "region", "10", "20", "100", "200"])
-        assert result.exit_code == 0
-        assert "Saved" in result.output
-        provider.capture_region.assert_called_once()
+        assert result.exit_code != 0
+        assert "Visible screenshot capture is removed" in result.output
+        provider.capture_region.assert_not_called()
 
     def test_permissions(self, mock_submodules, runner):
         """permissions command lists checks."""
@@ -223,24 +229,82 @@ class TestCLI:
         assert "Window:" in result.output
         assert "Vision:" in result.output
 
-    def test_permissions_reports_individual_failures(self, mock_submodules, runner):
-        """permissions keeps checking when one provider raises."""
+    def test_permissions_reports_removed_screenshot_without_provider_probe(self, mock_submodules, runner):
+        """permissions reports screenshot removal without probing screenshot providers."""
         mod = sys.modules["peekxd.screenshot"]
-        setattr(mod, "get_screenshot_provider", MagicMock(side_effect=RuntimeError("no display")))
 
         result = runner.invoke(cli, ["permissions"])
 
         assert result.exit_code == 0
-        assert "Screenshot: FAIL (no display)" in result.output
+        assert "Screenshot: REMOVED (use semantic state)" in result.output
         assert "Input:" in result.output
         assert "Vision:" in result.output
+        assert not hasattr(mod, "get_screenshot_provider") or callable(mod.get_screenshot_provider)
 
-    def test_permissions_shows_provider_label(self, mock_submodules, runner):
-        """permissions shows the screenshot provider label when available."""
-        provider = mock_submodules["peekxd.screenshot"]
-        provider.permission_label = "wslg/windows-host"
+    def test_see_capture_removed(self, mock_submodules, runner):
+        """legacy see capture path is removed in favor of see --semantic."""
+        mod = sys.modules["peekxd.screenshot"]
 
-        result = runner.invoke(cli, ["permissions"])
+        result = runner.invoke(cli, ["see", "capture"])
 
-        assert result.exit_code == 0
-        assert "Screenshot: OK (wslg/windows-host)" in result.output
+        assert result.exit_code != 0
+        assert "Visible screenshot capture is removed" in result.output
+        assert not hasattr(mod, "get_screenshot_provider") or callable(mod.get_screenshot_provider)
+
+    def test_see_semantic_json_uses_inspection_without_screenshot(self, mock_submodules, runner):
+        """see --semantic --json returns semantic envelope without screenshot provider."""
+        from peekxd.inspection.base import UIElement
+
+        inspection = mock_submodules["peekxd.inspection"]
+        screenshot = mock_submodules["peekxd.screenshot"]
+        inspection.get_ui_tree.return_value = [
+            UIElement(
+                id="0:1",
+                name="Search",
+                role="button",
+                position=(10, 20),
+                size=(30, 40),
+                parent=None,
+                children=[],
+                attributes={"label": "Find", "enabled": True, "focused": False},
+            )
+        ]
+        mock_submodules["peekxd.window"].list_windows.return_value = [
+            {"id": "0x1", "title": "Browser", "class": "firefox", "x": 1, "y": 2, "width": 800, "height": 600}
+        ]
+
+        result = runner.invoke(cli, ["see", "--semantic", "--json", "--app", "firefox"])
+
+        assert result.exit_code == 0, result.output
+        envelope = json.loads(result.output)
+        assert envelope["schema_version"] == "peekxd.see.v1"
+        assert envelope["command"] == "see --semantic"
+        assert envelope["result"] == {"ok": True, "error": None}
+        assert envelope["request"]["app"] == "firefox"
+        assert envelope["snapshot"]["snapshot_id"].startswith("snap_")
+        assert envelope["snapshot"]["elements"][0]["element_id"] == "W1-B1"
+        assert envelope["snapshot"]["elements"][0]["raw_element_id"] == "0:1"
+        assert envelope["snapshot"]["elements"][0]["bbox"] == {"x": 10, "y": 20, "width": 30, "height": 40}
+        assert envelope["snapshot"]["windows"][0]["window_id"] == "W1"
+        assert envelope["safety_state"]["code"] == "SEMANTIC_OK"
+        screenshot.get_screenshot_provider.assert_not_called()
+
+    def test_see_semantic_hud_shows_stable_element_ids(self, mock_submodules, runner):
+        """see --semantic default HUD renders operator-friendly element ids."""
+        from peekxd.inspection.base import UIElement
+
+        mock_submodules["peekxd.inspection"].get_ui_tree.return_value = [
+            UIElement("raw-text", "Address", "text", (5, 6), (100, 20), None, [], {}),
+            UIElement("raw-button", "Go", "button", (120, 6), (32, 20), None, [], {}),
+        ]
+
+        result = runner.invoke(cli, ["see", "--semantic", "--max-elements", "2"])
+
+        assert result.exit_code == 0, result.output
+        assert "snapshot=snap_" in result.output
+        assert "schema=peekxd.see.v1" in result.output
+        assert "elements=2 shown=2" in result.output
+        assert "W1-T1 text" in result.output
+        assert "W1-B2 button" in result.output
+        mock_submodules["peekxd.screenshot"].get_screenshot_provider.assert_not_called()
+

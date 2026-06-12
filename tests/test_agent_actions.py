@@ -102,56 +102,32 @@ class TestScreenDiff:
 
 
 class TestWaitCondition:
-    """Test wait conditions."""
+    """Test removed screenshot/vision wait conditions."""
 
-    def test_for_element_found(self):
-        """Test waiting for element that exists."""
+    def test_for_element_removed(self):
+        """Vision/screenshot element waits are removed."""
         mock_screenshot = MagicMock()
-        mock_screenshot.capture_screen.return_value = "/tmp/test.png"
         mock_vision = MagicMock()
-        mock_vision.find_element.return_value = (100, 200)
 
-        result = WaitCondition.for_element(
-            "Submit button",
-            timeout=1.0,
-            vision_provider=mock_vision,
-            screenshot_provider=mock_screenshot,
-        )
+        with pytest.raises(Exception, match="wait_for_element was removed"):
+            WaitCondition.for_element(
+                "Submit button",
+                timeout=1.0,
+                vision_provider=mock_vision,
+                screenshot_provider=mock_screenshot,
+            )
+        mock_screenshot.capture_screen.assert_not_called()
 
-        assert result["found"] is True
-        assert result["position"] == (100, 200)
-
-    def test_for_element_timeout(self):
-        """Test waiting for element that never appears."""
+    def test_for_text_removed(self):
+        """Vision/screenshot text waits are removed."""
         mock_screenshot = MagicMock()
-        mock_screenshot.capture_screen.return_value = "/tmp/test.png"
         mock_vision = MagicMock()
-        mock_vision.find_element.return_value = None
 
-        result = WaitCondition.for_element(
-            "Nonexistent",
-            timeout=0.1,
-            poll_interval=0.05,
-            vision_provider=mock_vision,
-            screenshot_provider=mock_screenshot,
-        )
-
-        assert result["found"] is False
-        assert result["position"] is None
-
-    def test_for_text_found(self):
-        """Test waiting for text that appears."""
-        mock_screenshot = MagicMock()
-        mock_screenshot.capture_screen.return_value = "/tmp/test.png"
-        mock_vision = MagicMock()
-        mock_vision.analyze.return_value = "yes"
-
-        result = WaitCondition.for_text(
-            "Loading complete",
-            timeout=1.0,
-            vision_provider=mock_vision,
-            screenshot_provider=mock_screenshot,
-        )
-
-        assert result["found"] is True
-        assert result["text"] == "Loading complete"
+        with pytest.raises(Exception, match="wait_for_text was removed"):
+            WaitCondition.for_text(
+                "Loading complete",
+                timeout=1.0,
+                vision_provider=mock_vision,
+                screenshot_provider=mock_screenshot,
+            )
+        mock_screenshot.capture_screen.assert_not_called()

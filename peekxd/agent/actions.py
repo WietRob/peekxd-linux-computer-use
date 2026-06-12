@@ -152,12 +152,8 @@ class ActionSequence:
         Returns:
             List of result dicts for each step.
         """
-        from ..screenshot import get_screenshot_provider
         from ..input import get_input_provider
-        from ..vision import get_vision_provider
 
-        if self._screenshot is None:
-            self._screenshot = get_screenshot_provider()
         if self._input is None:
             self._input = get_input_provider()
 
@@ -197,18 +193,7 @@ class ActionSequence:
             result["detail"] = f"clicked at ({p['x']},{p['y']})"
 
         elif step.action == "find_click":
-            # Need vision provider for this
-            from ..vision import get_vision_provider
-            if self._vision is None:
-                self._vision = get_vision_provider()
-            # Capture screen first
-            cap_path = os.path.join(tempfile.gettempdir(), "find_click_cap.png")
-            self._screenshot.capture_screen(cap_path)
-            coords = self._vision.find_element(cap_path, p["description"])
-            if coords is None:
-                raise peekxdError(f"Element not found: {p['description']}")
-            self._input.click(coords[0], coords[1], p.get("button", "left"))
-            result["detail"] = f"found and clicked at ({coords[0]},{coords[1]})"
+            raise peekxdError("Screenshot/vision find_click was removed; use semantic element IDs from `peekxd see --semantic`.")
 
         elif step.action == "type":
             self._input.type_text(p["text"])
@@ -235,9 +220,7 @@ class ActionSequence:
             result["detail"] = f"waited {p['seconds']}s"
 
         elif step.action == "capture":
-            path = self._screenshot.capture_screen(p["output_path"])
-            result["detail"] = f"captured {path}"
-            result["path"] = path
+            raise peekxdError("Screenshot capture was removed; use semantic state from `peekxd see --semantic`.")
 
     def to_dict(self) -> List[Dict[str, Any]]:
         """Serialize the sequence to a list of dicts."""
@@ -275,36 +258,9 @@ class ScreenDiff:
         self.last_hash: Optional[str] = None
 
     def capture_and_hash(self, output_path: Optional[str] = None) -> Tuple[str, str]:
-        """Capture a screenshot and compute its hash.
-
-        Returns:
-            (path, hash) tuple.
-        """
-        from ..screenshot import get_screenshot_provider
-
-        if output_path is None:
-            output_path = os.path.join(tempfile.gettempdir(), f"diff_cap_{int(time.time())}.png")
-
-        provider = get_screenshot_provider()
-        path = provider.capture_screen(output_path)
-
-        # Compute perceptual hash
-        try:
-            from PIL import Image
-            img = Image.open(path)
-            img_small = img.resize((16, 16)).convert("L")
-            pixels = list(img_small.getdata())
-            avg = sum(pixels) / len(pixels)
-            bits = "".join("1" if p > avg else "0" for p in pixels)
-            hash_val = hex(int(bits, 2))[2:].zfill(16)
-        except Exception:
-            # Fallback: file hash
-            with open(path, "rb") as f:
-                hash_val = hashlib.md5(f.read()).hexdigest()[:16]
-
-        self.last_screenshot = path
-        self.last_hash = hash_val
-        return path, hash_val
+        """Screenshot diffing was removed with pixel capture."""
+        del output_path
+        raise peekxdError("ScreenDiff was removed because it requires screenshot capture; use semantic state polling instead.")
 
     def has_changed(self, threshold: float = 0.1) -> bool:
         """Check if the screen has changed since last capture.
@@ -428,36 +384,8 @@ class WaitCondition:
         Returns:
             Dict with 'found', 'position', 'elapsed', 'screenshot_path'.
         """
-        from ..screenshot import get_screenshot_provider
-        from ..vision import get_vision_provider
-
-        if vision_provider is None:
-            vision_provider = get_vision_provider()
-        if screenshot_provider is None:
-            screenshot_provider = get_screenshot_provider()
-
-        start = time.time()
-        cap_path = os.path.join(tempfile.gettempdir(), "wait_element.png")
-
-        while time.time() - start < timeout:
-            screenshot_provider.capture_screen(cap_path)
-            coords = vision_provider.find_element(cap_path, description)
-            if coords is not None:
-                elapsed = time.time() - start
-                return {
-                    "found": True,
-                    "position": coords,
-                    "elapsed": round(elapsed, 2),
-                    "screenshot_path": cap_path,
-                }
-            time.sleep(poll_interval)
-
-        return {
-            "found": False,
-            "position": None,
-            "elapsed": round(time.time() - start, 2),
-            "screenshot_path": cap_path,
-        }
+        del description, timeout, poll_interval, vision_provider, screenshot_provider
+        raise peekxdError("Vision/screenshot wait_for_element was removed; use AT-SPI semantic polling instead.")
 
     @staticmethod
     def for_text(
@@ -471,37 +399,8 @@ class WaitCondition:
 
         Uses vision analysis to check if the text is visible.
         """
-        from ..screenshot import get_screenshot_provider
-        from ..vision import get_vision_provider
-
-        if vision_provider is None:
-            vision_provider = get_vision_provider()
-        if screenshot_provider is None:
-            screenshot_provider = get_screenshot_provider()
-
-        start = time.time()
-        cap_path = os.path.join(tempfile.gettempdir(), "wait_text.png")
-        prompt = f'Is the text "{text}" visible on this screen? Answer ONLY "yes" or "no".'
-
-        while time.time() - start < timeout:
-            screenshot_provider.capture_screen(cap_path)
-            result = vision_provider.analyze(cap_path, prompt).strip().lower()
-            if result.startswith("yes"):
-                elapsed = time.time() - start
-                return {
-                    "found": True,
-                    "text": text,
-                    "elapsed": round(elapsed, 2),
-                    "screenshot_path": cap_path,
-                }
-            time.sleep(poll_interval)
-
-        return {
-            "found": False,
-            "text": text,
-            "elapsed": round(time.time() - start, 2),
-            "screenshot_path": cap_path,
-        }
+        del text, timeout, poll_interval, vision_provider, screenshot_provider
+        raise peekxdError("Vision/screenshot wait_for_text was removed; use AT-SPI semantic polling instead.")
 
     @staticmethod
     def for_no_change(

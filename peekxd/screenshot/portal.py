@@ -1,4 +1,9 @@
-"""Removed WSL screenshot provider stub."""
+"""Removed screenshot provider stub.
+
+Visible screenshot capture was removed from PeekXD because it can trigger
+portal/fullscreen prompts and disturb the user's live desktop. Use
+``peekxd see --semantic`` for non-visual state.
+"""
 
 from .base import ScreenshotProvider
 from ..core.errors import ScreenshotError
@@ -6,7 +11,7 @@ from ..core.errors import ScreenshotError
 _REMOVED = "Visible screenshot capture is removed from PeekXD; use `peekxd see --semantic`."
 
 
-class WindowsWslProvider(ScreenshotProvider):
+class XdgDesktopPortalProvider(ScreenshotProvider):
     """Compatibility stub that never captures pixels."""
 
     permission_label = "removed"
@@ -36,6 +41,3 @@ class WindowsWslProvider(ScreenshotProvider):
     @classmethod
     def is_available(cls) -> bool:
         return False
-
-
-WSLgScreenshotProvider = WindowsWslProvider

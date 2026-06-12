@@ -36,8 +36,8 @@ def _make_shadow_plan():
 
 
 def _make_direct_plan():
-    """Plan that triggers DIRECT zone (capture_screen)."""
-    return {"action": "capture_screen", "params": {}, "reason": "test"}
+    """Plan that triggers DIRECT zone without pixel capture."""
+    return {"action": "list_windows", "params": {}, "reason": "test"}
 
 
 def _screen_state():

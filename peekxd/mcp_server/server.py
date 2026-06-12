@@ -1,9 +1,10 @@
-"""MCP Server for peekxd Linux."""
+"""MCP Server for peekxd Linux.
 
-import json
-import os
-import time
-from pathlib import Path
+The default MCP surface is semantic-first. Pixel/screenshot tools are not
+registered because visible capture can disturb the user's live desktop on
+GNOME/Wayland portal systems.
+"""
+
 from typing import Any, Dict, List, Optional
 
 try:
@@ -11,23 +12,12 @@ try:
 except ImportError:
     FastMCP = None
 
-from ..core import peekxdError
 from ..config import ConfigManager
+from ..semantic import build_semantic_snapshot
 
-# Lazy imports -- modules will be loaded on first use
-_screenshot = None
 _input = None
 _inspection = None
 _window = None
-_vision = None
-
-
-def _get_screenshot():
-    global _screenshot
-    if _screenshot is None:
-        from ..screenshot import get_screenshot_provider
-        _screenshot = get_screenshot_provider()
-    return _screenshot
 
 
 def _get_input():
@@ -54,14 +44,6 @@ def _get_window():
     return _window
 
 
-def _get_vision():
-    global _vision
-    if _vision is None:
-        from ..vision import get_vision_provider
-        _vision = get_vision_provider()
-    return _vision
-
-
 def create_mcp_server(config: Optional[ConfigManager] = None):
     """Create and configure the FastMCP server."""
     if FastMCP is None:
@@ -70,20 +52,25 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     mcp = FastMCP("peekxd-linux")
 
     @mcp.tool()
-    def capture_screen(output_path: Optional[str] = None, mode: str = "screen") -> Dict[str, Any]:
-        """Capture a screenshot. Mode: screen, window, or active."""
-        provider = _get_screenshot()
-        if not output_path:
-            output_path = str(Path.home() / "peekxd_capture.png")
-        if mode == "screen":
-            path = provider.capture_screen(output_path)
-        elif mode == "window":
-            path = provider.capture_window(output_path)
-        elif mode == "active":
-            path = provider.capture_window(output_path)  # capture active window
-        else:
-            return {"error": f"Unknown mode: {mode}"}
-        return {"success": True, "path": path, "mode": mode}
+    def see_semantic(
+        app_name: Optional[str] = None,
+        window_id: Optional[str] = None,
+        cache_policy: str = "prefer_live",
+        ttl_seconds: int = 30,
+        max_elements: int = 60,
+    ) -> Dict[str, Any]:
+        """Return semantic UI/window state without screenshots or portal prompts."""
+        return build_semantic_snapshot(
+            app=app_name,
+            window_id=window_id,
+            cache_policy=cache_policy,
+            ttl_seconds=ttl_seconds,
+            max_elements=max_elements,
+            visual=False,
+            visual_once=False,
+            inspection_provider=_get_inspection(),
+            window_provider=_get_window(),
+        )
 
     @mcp.tool()
     def move_mouse(x: int, y: int) -> Dict[str, Any]:
@@ -133,85 +120,27 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         return elem._asdict() if elem else None
 
     @mcp.tool()
-    def analyze_image(image_path: str, question: str) -> str:
-        """Analyze an image with AI vision."""
-        return _get_vision().analyze(image_path, question)
-
-    @mcp.tool()
     def get_active_window() -> Optional[Dict[str, Any]]:
         """Get the currently focused window."""
         return _get_window().get_active_window()
 
     @mcp.tool()
-    def mark_elements(prompt: Optional[str] = None) -> Dict[str, Any]:
-        """Capture screen, detect ALL UI elements with AI, draw numbered bounding boxes.
-        Returns element list with coordinates and path to marked image.
-        USE THIS FIRST when you need to interact with unknown UI."""
-        from ..agent.screen_markup import analyze_screen_with_markup
-        cap_path = str(Path.home() / f"peekxd_mark_{int(time.time())}.png")
-        _get_screenshot().capture_screen(cap_path)
-        return analyze_screen_with_markup(cap_path, prompt=prompt)
-
-    @mcp.tool()
-    def find_and_click(description: str, button: str = "left") -> Dict[str, Any]:
-        """Find an element by description and click it. Combines vision + input."""
-        cap_path = str(Path.home() / f"findclick_{int(time.time())}.png")
-        _get_screenshot().capture_screen(cap_path)
-        coords = _get_vision().find_element(cap_path, description)
-        if coords is None:
-            return {"success": False, "error": f"Element not found: {description}"}
-        _get_input().click(coords[0], coords[1], button)
-        return {"success": True, "clicked_at": {"x": coords[0], "y": coords[1]}, "description": description}
-
-    @mcp.tool()
-    def type_into_field(field_description: str, text: str) -> Dict[str, Any]:
-        """Find a text field by description, click it, and type text."""
-        cap_path = str(Path.home() / f"typefield_{int(time.time())}.png")
-        _get_screenshot().capture_screen(cap_path)
-        coords = _get_vision().find_element(cap_path, field_description)
-        if coords is None:
-            return {"success": False, "error": f"Field not found: {field_description}"}
-        _get_input().click(coords[0], coords[1])
-        time.sleep(0.3)
-        _get_input().type_text(text)
-        return {"success": True, "field": field_description, "typed": text}
-
-    @mcp.tool()
     def wait_for_element(description: str, timeout: float = 10.0) -> Dict[str, Any]:
-        """Wait for an element to appear on screen."""
+        """Wait for an accessible element to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
         return WaitCondition.for_element(description, timeout)
 
     @mcp.tool()
     def wait_for_text(text: str, timeout: float = 10.0) -> Dict[str, Any]:
-        """Wait for specific text to appear on screen."""
+        """Wait for accessible text to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
         return WaitCondition.for_text(text, timeout)
-
-    @mcp.tool()
-    def run_action_sequence(steps_json: str, stop_on_error: bool = True) -> List[Dict[str, Any]]:
-        """Execute a sequence of actions. steps_json is a JSON array of action objects.
-        Each step: {\"action\": \"click|type|key|wait|capture\", \"params\": {...}}"""
-        import json
-        from ..agent.actions import ActionSequence
-        steps = json.loads(steps_json)
-        seq = ActionSequence.from_dict(steps)
-        return seq.execute(stop_on_error=stop_on_error)
-
-    @mcp.tool()
-    def screen_has_changed(threshold: float = 0.1) -> Dict[str, Any]:
-        """Check if the screen has changed since last check."""
-        from ..agent.actions import ScreenDiff
-        differ = ScreenDiff()
-        changed = differ.has_changed(threshold)
-        return {"changed": changed, "screenshot_path": differ.last_screenshot}
 
     return mcp
 
 
 def main():
     """Run the MCP server."""
-    import asyncio
     config = ConfigManager()
     mcp = create_mcp_server(config)
     transport = config.get("mcp.transport", "stdio")

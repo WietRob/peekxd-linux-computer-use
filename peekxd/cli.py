@@ -1,5 +1,6 @@
 """CLI for peekxd Linux."""
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -9,6 +10,13 @@ import click
 from .core import detect_desktop, is_x11, is_wayland, peekxdError
 from .core.doctor import run_doctor
 from .config import ConfigManager
+from .screenshot import REMOVED_SCREENSHOT_MESSAGE
+
+
+def _fail_removed_screenshot_path() -> None:
+    raise click.ClickException(
+        f"{REMOVED_SCREENSHOT_MESSAGE} Use `peekxd see --semantic` instead."
+    )
 
 
 @click.group()
@@ -32,13 +40,9 @@ def capture():
 @click.option("--display", "-d", default=0, help="Display number")
 @click.pass_context
 def capture_screen(ctx, output, display):
-    """Capture full screen."""
-    from .screenshot import get_screenshot_provider
-    provider = get_screenshot_provider()
-    if not output:
-        output = f"peekxd_screen_{display}.png"
-    path = provider.capture_screen(output, display)
-    click.echo(f"Saved: {path}")
+    """Screenshot capture was removed; use semantic state instead."""
+    del ctx, output, display
+    _fail_removed_screenshot_path()
 
 
 @capture.command(name="window")
@@ -46,13 +50,9 @@ def capture_screen(ctx, output, display):
 @click.option("--id", help="Window ID")
 @click.pass_context
 def capture_window(ctx, output, id):
-    """Capture a window."""
-    from .screenshot import get_screenshot_provider
-    provider = get_screenshot_provider()
-    if not output:
-        output = "peekxd_window.png"
-    path = provider.capture_window(output, id)
-    click.echo(f"Saved: {path}")
+    """Screenshot capture was removed; use semantic state instead."""
+    del ctx, output, id
+    _fail_removed_screenshot_path()
 
 
 @capture.command(name="region")
@@ -63,18 +63,45 @@ def capture_window(ctx, output, id):
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
 @click.pass_context
 def capture_region(ctx, x, y, width, height, output):
-    """Capture a region: X Y WIDTH HEIGHT."""
-    from .screenshot import get_screenshot_provider
-    provider = get_screenshot_provider()
-    if not output:
-        output = "peekxd_region.png"
-    path = provider.capture_region(output, x, y, width, height)
-    click.echo(f"Saved: {path}")
+    """Screenshot capture was removed; use semantic state instead."""
+    del ctx, x, y, width, height, output
+    _fail_removed_screenshot_path()
 
 
-@cli.group()
-def see():
+@cli.group(invoke_without_command=True)
+@click.option("--semantic", is_flag=True, help="Return a semantic accessibility snapshot without visual capture")
+@click.option("--json", "json_output", is_flag=True, help="Emit only the JSON semantic envelope")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
+@click.option("--hud/--no-hud", default=True, help="Render a compact terminal HUD for semantic output")
+@click.option("--app", help="Application/window title substring filter")
+@click.option("--window-id", help="Window ID filter")
+@click.option("--cache-policy", default="prefer_live", type=click.Choice(["prefer_live", "live_only", "cache_only", "refresh"]))
+@click.option("--ttl", "ttl_seconds", default=30, type=int, help="Semantic snapshot TTL in seconds")
+@click.option("--max-elements", default=60, type=int, help="Maximum semantic elements to include")
+@click.pass_context
+def see(ctx, semantic, json_output, pretty, hud, app, window_id, cache_policy, ttl_seconds, max_elements):
     """See and analyze the screen."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if not semantic:
+        click.echo(ctx.get_help())
+        return
+
+    from .semantic import build_semantic_snapshot, render_semantic_hud
+
+    envelope = build_semantic_snapshot(
+        app=app,
+        window_id=window_id,
+        cache_policy=cache_policy,
+        ttl_seconds=ttl_seconds,
+        max_elements=max_elements,
+    )
+    if json_output:
+        click.echo(json.dumps(envelope, indent=2 if pretty else None, sort_keys=bool(pretty)))
+    elif hud:
+        click.echo(render_semantic_hud(envelope, max_elements=max_elements))
+    else:
+        click.echo(json.dumps(envelope))
 
 
 @see.command(name="capture")
@@ -83,26 +110,9 @@ def see():
 @click.option("--analyze", "-a", help="Analyze with AI prompt")
 @click.pass_context
 def see_capture(ctx, app, output, analyze):
-    """Capture and optionally analyze."""
-    from .screenshot import get_screenshot_provider
-    from .vision import get_vision_provider
-    provider = get_screenshot_provider()
-    if not output:
-        output = "peekxd_see.png"
-    if app:
-        windows = provider.list_windows()
-        win = next((w for w in windows if app.lower() in w.get("title", "").lower()), None)
-        if win:
-            path = provider.capture_window(output, str(win["id"]))
-        else:
-            path = provider.capture_screen(output)
-    else:
-        path = provider.capture_screen(output)
-    click.echo(f"Saved: {path}")
-    if analyze:
-        vision = get_vision_provider()
-        result = vision.analyze(path, analyze)
-        click.echo(f"Analysis: {result}")
+    """Screenshot-backed see was removed; use ``see --semantic``."""
+    del ctx, app, output, analyze
+    _fail_removed_screenshot_path()
 
 
 @cli.command(name="click")
@@ -287,7 +297,6 @@ def config_get(ctx, key):
 @cli.command()
 def permissions():
     """Check system permissions."""
-    from .screenshot import get_screenshot_provider
     from .input import get_input_provider
     from .inspection import get_inspection_provider
     from .window import get_window_provider
@@ -307,7 +316,7 @@ def permissions():
 
     checks = [
         ("Desktop", f"{detect_desktop().value}"),
-        _status("Screenshot", get_screenshot_provider),
+        ("Screenshot", "REMOVED (use semantic state)"),
         _status("Input", get_input_provider),
         _status("Inspection", get_inspection_provider),
         _status("Window", get_window_provider),
@@ -456,21 +465,9 @@ def agent_tools():
 @click.option("--output", "-o", type=click.Path(), help="Output path for marked image")
 @click.option("--prompt", "-p", help="Custom element detection prompt")
 def agent_mark(output, prompt):
-    """Capture screen, detect all UI elements, draw numbered bounding boxes."""
-    from .agent import analyze_screen_with_markup
-    from .screenshot import get_screenshot_provider
-
-    screenshot = get_screenshot_provider()
-    cap_path = os.path.join(tempfile.gettempdir(), f"mark_{int(time.time())}.png")
-    screenshot.capture_screen(cap_path)
-
-    click.echo("Analyzing screen with AI...")
-    result = analyze_screen_with_markup(cap_path, prompt=prompt, output_path=output)
-
-    click.echo(f"\nDetected {result['count']} elements:")
-    for idx, desc in result["element_map"].items():
-        click.echo(f"  {desc}")
-    click.echo(f"\nMarked image saved: {result['markup_path']}")
+    """Screenshot-backed element markup was removed; use semantic IDs."""
+    del output, prompt
+    _fail_removed_screenshot_path()
 
 
 @cli.group()
@@ -520,19 +517,8 @@ def wait_for(element, text, stable, change, timeout):
             click.echo(f"Found text '{text}' ({result['elapsed']}s)")
         else:
             click.echo(f"Timeout waiting for text: {text}")
-    elif stable:
-        result = WaitCondition.for_no_change(timeout)
-        if result["stable"]:
-            click.echo(f"Screen stabilized ({result['elapsed']}s)")
-        else:
-            click.echo("Timeout waiting for stability")
-    elif change:
-        differ = ScreenDiff()
-        result = differ.wait_for_change(timeout)
-        if result["changed"]:
-            click.echo(f"Screen changed ({result['elapsed']}s)")
-        else:
-            click.echo("Timeout waiting for change")
+    elif stable or change:
+        _fail_removed_screenshot_path()
     else:
         click.echo("Error: Specify --element, --text, --stable, or --change")
 
