@@ -195,6 +195,7 @@ class WaylandWindowProvider(WindowProvider):
         """List windows using wlrctl.
 
         Parses the ``wlrctl window list`` output.
+        Falls back to swaymsg for geometry if available.
 
         Returns:
             List of window dictionaries.
@@ -202,6 +203,16 @@ class WaylandWindowProvider(WindowProvider):
         result = self._run_wlrctl(["window", "list"], check=False, timeout=10.0)
         if result.returncode != 0 or not result.stdout.strip():
             return []
+
+        # Try to get geometry from swaymsg if available
+        sway_geometry = {}
+        try:
+            sway_result = self._run_swaymsg(["-t", "get_tree"], timeout=10.0)
+            if sway_result.returncode == 0:
+                tree = json.loads(sway_result.stdout)
+                sway_geometry = self._extract_sway_geometry(tree)
+        except (WindowError, json.JSONDecodeError, FileNotFoundError):
+            pass  # swaymsg not available or failed
 
         windows: List[Dict[str, Any]] = []
         for line in result.stdout.strip().splitlines():
@@ -219,19 +230,52 @@ class WaylandWindowProvider(WindowProvider):
                 app_id = ""
                 title = line
 
-            # wlrctl doesn't provide geometry; use placeholder
+            window_id = title or app_id
+            # Use swaymsg geometry if available, otherwise placeholder
+            geometry = sway_geometry.get(window_id, {"x": 0, "y": 0, "width": 0, "height": 0})
+
             windows.append(
                 {
-                    "id": title or app_id,
-                    "name": title or app_id,
+                    "id": window_id,
+                    "name": window_id,
                     "app_id": app_id,
-                    "x": 0,
-                    "y": 0,
-                    "width": 0,
-                    "height": 0,
+                    "x": geometry["x"],
+                    "y": geometry["y"],
+                    "width": geometry["width"],
+                    "height": geometry["height"],
                 }
             )
         return windows
+
+    def _extract_sway_geometry(self, tree: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+        """Extract window geometry from swaymsg tree.
+
+        Returns a dict mapping window name/app_id to geometry.
+        """
+        geometry = {}
+
+        def _walk(node):
+            if node.get("type") == "con" and node.get("name"):
+                window_id = node.get("name", "")
+                app_id = node.get("app_id", "")
+                rect = node.get("rect", {})
+                geo = {
+                    "x": rect.get("x", 0),
+                    "y": rect.get("y", 0),
+                    "width": rect.get("width", 0),
+                    "height": rect.get("height", 0),
+                }
+                geometry[window_id] = geo
+                if app_id:
+                    geometry[app_id] = geo
+
+            for child in node.get("nodes", []):
+                _walk(child)
+            for child in node.get("floating_nodes", []):
+                _walk(child)
+
+        _walk(tree)
+        return geometry
 
     def _list_swaymsg(self) -> List[Dict[str, Any]]:
         """List windows using swaymsg.
