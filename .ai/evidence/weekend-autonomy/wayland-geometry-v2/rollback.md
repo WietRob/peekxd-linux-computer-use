@@ -2,8 +2,10 @@
 
 **Date:** 2026-06-19
 **Branch:** `autonomy/peekxd/wayland-geometry-v2-20260619`
-**Status:** IN PROGRESS
+**Status:** COMPLETED
 **Scope:** `peekxd/window/wayland.py`
+**Product Code Commit:** `ccf5f83`
+**Evidence Commit:** `b3c3d40`
 
 ---
 
@@ -18,10 +20,15 @@
 ## Rollback Command
 
 ```bash
-git revert <commit_hash>
+git revert ccf5f83
 ```
 
-No force-push needed. Revert creates a new commit that undoes the change.
+No force-push needed. Revert creates a new commit that undoes the product code change.
+
+For evidence cleanup (optional):
+```bash
+git revert b3c3d40
+```
 
 ---
 
