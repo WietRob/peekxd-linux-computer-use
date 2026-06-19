@@ -20,8 +20,8 @@ class TestZoneDecision:
     """Test risk-based zone assignment."""
 
     def test_readonly_action_direct(self):
-        """Read-only actions should go to DIRECT."""
-        decision = ZoneDecision.decide("capture_screen", {})
+        """Non-pixel read-only actions should go to DIRECT."""
+        decision = ZoneDecision.decide("see_semantic", {})
         assert decision.zone == Zone.DIRECT
         assert decision.risk_level == "safe"
 
@@ -84,11 +84,11 @@ class TestZoneDecision:
         assert decision.zone == Zone.GHOST
         assert any("system_key" in f for f in decision.risk_factors)
 
-    def test_protected_path_ghost(self):
-        """Screenshot to protected path should be GHOST."""
+    def test_removed_capture_action_ghost(self):
+        """Screenshot actions are blocked, not direct observations."""
         decision = ZoneDecision.decide("capture_screen", {"output_path": "/etc/passwd.png"})
         assert decision.zone == Zone.GHOST
-        assert any("protected_path" in f for f in decision.risk_factors)
+        assert any("removed_screenshot_action" in f for f in decision.risk_factors)
 
     def test_list_windows_direct(self):
         """List windows should be DIRECT."""
@@ -100,10 +100,11 @@ class TestZoneDecision:
         decision = ZoneDecision.decide("find_element", {"description": "Submit button"})
         assert decision.zone == Zone.DIRECT
 
-    def test_mark_elements_direct(self):
-        """Mark elements should be DIRECT."""
+    def test_mark_elements_removed(self):
+        """Mark-elements is pixel/vision capture and is blocked."""
         decision = ZoneDecision.decide("mark_elements", {})
-        assert decision.zone == Zone.DIRECT
+        assert decision.zone == Zone.GHOST
+        assert any("removed_screenshot_action" in f for f in decision.risk_factors)
 
     def test_multiple_risk_factors(self):
         """Multiple risk factors should all be recorded."""

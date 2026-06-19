@@ -1,8 +1,7 @@
 """Agent orchestrator for peekxd Linux.
 
-Implements a See → Think → Act loop for autonomous task execution.
-The orchestrator can run tasks by capturing the screen, analyzing it,
-planning actions, and executing them — repeating until the task is done.
+Semantic-first orchestrator. Pixel/screenshot capture was removed because it can
+trigger visible portal prompts and disturb the user's live desktop.
 """
 
 import json
@@ -129,10 +128,7 @@ class AgentOrchestrator:
         return self._vision_prov
 
     def _get_screenshot(self):
-        if self._screenshot_prov is None:
-            from ..screenshot import get_screenshot_provider
-            self._screenshot_prov = get_screenshot_provider()
-        return self._screenshot_prov
+        raise peekxdError("Screenshot access was removed; use semantic state instead.")
 
     def _get_input(self):
         if self._input_prov is None:
@@ -302,32 +298,26 @@ class AgentOrchestrator:
         return result
 
     def _see(self) -> Dict[str, Any]:
-        """Capture and analyze the current screen.
+        """Return semantic state without screenshots or vision capture."""
+        from ..semantic import build_semantic_snapshot
+        from ..inspection import get_inspection_provider
+        from ..window import get_window_provider
 
-        Returns:
-            Dict with 'path' (screenshot), 'description' (AI analysis),
-            and 'elements' (detected UI elements).
-        """
-        cap_path = os.path.join(tempfile.gettempdir(), f"orch_see_{int(time.time())}.png")
-        self.screenshot.capture_screen(cap_path)
-
-        # Quick analysis
-        description = self.vision.analyze(
-            cap_path,
-            "Describe the current screen briefly. What application is active? "
-            "What interactive elements (buttons, fields, links) are visible? "
-            "List them with their approximate positions.",
+        snapshot = build_semantic_snapshot(
+            inspection_provider=get_inspection_provider(),
+            window_provider=get_window_provider(),
+            max_elements=80,
         )
-
-        # Record in memory and audit
-        if self.memory:
-            self.memory.record_screen(cap_path, description)
-        if self.audit:
-            self.audit.log_screenshot(cap_path, "orchestrator_see")
-
+        elements = snapshot.get("snapshot", {}).get("elements", [])
+        windows = snapshot.get("snapshot", {}).get("windows", [])
+        description = (
+            f"Semantic snapshot: {len(windows)} windows, {len(elements)} accessible elements. "
+            "No screenshot or portal capture was used."
+        )
         return {
-            "path": cap_path,
+            "path": None,
             "description": description,
+            "semantic_snapshot": snapshot,
         }
 
     def _think(
@@ -368,14 +358,12 @@ Step {step + 1} of {self.max_steps}.
 
 Decide the SINGLE next action to progress toward the task.
 
-IMPORTANT: For element interactions, FIRST use mark_elements to detect all UI elements with coordinates,
-then use those coordinates for clicks. Only use element_description for click when you are confident
-about the element's appearance.
+IMPORTANT: Pixel/screenshot actions are unavailable. Use semantic state and explicit coordinates/window IDs only.
 
 Available actions:
-- capture_screen: Take a screenshot
-- mark_elements: Detect all UI elements with bounding boxes (USE THIS FIRST when unsure about coordinates)
-- click: Click at x,y coordinates OR click an element by description
+- list_windows: List windows
+- find_element: Query accessible UI elements
+- click: Click at explicit x,y coordinates
 - type: Type text
 - key: Press a key or hotkey
 - scroll: Scroll in a direction
@@ -385,7 +373,7 @@ Available actions:
 
 Respond with ONLY a JSON object:
 {{
-  "action": "click|type|key|scroll|capture_screen|mark_elements|focus_window|wait|done",
+  "action": "list_windows|find_element|click|type|key|scroll|focus_window|wait|done",
   "params": {{}},
   "reason": "why this action"
 }}
@@ -393,22 +381,21 @@ Respond with ONLY a JSON object:
 If the task is complete, use action "done"."""
 
         try:
-            response = self.vision.analyze(screen_state["path"], prompt)
+            response = self.vision.analyze_text(prompt) if hasattr(self.vision, "analyze_text") else self.vision.analyze(None, prompt)
 
             # Use robust parser instead of fragile manual extraction
             try:
                 plan = self._parser.extract_with_retry(response, max_retries=1)
             except ValueError:
-                # Fallback: capture screen and try again
                 return {
-                    "action": "capture_screen",
+                    "action": "list_windows",
                     "params": {},
-                    "reason": f"Failed to parse plan from vision response. Re-observing.",
+                    "reason": "Failed to parse plan from model response. Re-observing semantic state.",
                 }
 
             # Validate required fields
             if "action" not in plan or not isinstance(plan["action"], str):
-                plan["action"] = "capture_screen"
+                plan["action"] = "list_windows"
             if "params" not in plan or not isinstance(plan["params"], dict):
                 plan["params"] = {}
             if "reason" not in plan:
@@ -702,21 +689,18 @@ If the task is complete, use action "done"."""
                         resolved_params = {**resolved_params, "x": cached[0], "y": cached[1]}
                         del resolved_params["element_description"]
 
-            # Setup ShadowRecorder
-            from ..core.shadow import ShadowRecorder
-            shadow_recorder = ShadowRecorder(
-                capture_fn=lambda p: self.screenshot.capture_screen(p),
-                get_screenshot_path_fn=lambda: self.audit.get_next_screenshot_path("shadow")
-                if self.audit else f"/tmp/shadow_{int(time.time())}.png",
-            )
-
-            # Wrap execution: before snapshot → execute → after snapshot
-            action_result, shadow_result = shadow_recorder.wrap(
-                action_callable=lambda: self._execute_action(action, resolved_params),
-                action=action,
-                params=resolved_params,
-                screen_state=screen_state,
-            )
+            # Shadow snapshots used to require screenshots. Execute the action
+            # without pixel before/after capture and mark semantic shadow mode.
+            action_result = self._execute_action(action, resolved_params)
+            action_result["shadow"] = {
+                "enabled": False,
+                "snapshot_before": {"screenshot_path": screen_state.get("path"), "semantic_only": True},
+                "snapshot_after": None,
+                "changed": False,
+                "diff_summary": "pixel screenshot diff disabled; semantic state only",
+                "error": "Screenshot capture failed intentionally: pixel screenshot shadow snapshots were removed; semantic state only",
+                "reason": "pixel screenshot shadow snapshots were removed; semantic state only",
+            }
 
             # Update memory with element positions
             if action in ("click",) and self.memory and "x" in action_result:
@@ -724,23 +708,15 @@ If the task is complete, use action "done"."""
                 elem_desc = params.get("element_description", f"element_at_{pos}")
                 self.memory.remember_element(elem_desc, pos, source="agent")
 
-            # Always attach shadow metadata to action_result
-            shadow_dict = shadow_result.to_dict()
-            action_result["shadow"] = shadow_dict
-
-            # Audit log with zone=shadow, executed=True, screenshot paths
             if self.audit:
-                screenshot_before = shadow_result.before_snapshot.screenshot_path if shadow_result.before_snapshot else None
-                screenshot_after = shadow_result.after_snapshot.screenshot_path if shadow_result.after_snapshot else None
-
                 self.audit.log_action(
                     action=action,
                     params=resolved_params,
                     result=action_result,
                     zone=zone_decision.zone.value,
                     executed=True,
-                    screenshot_before=screenshot_before,
-                    screenshot_after=screenshot_after,
+                    screenshot_before=screen_state.get("path"),
+                    screenshot_after=None,
                 )
 
             return action_result
@@ -784,22 +760,22 @@ If the task is complete, use action "done"."""
 
     def _execute_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Dispatch action to Hermes tool execution."""
-        dispatch = {
-            "capture_screen": lambda p: execute_hermes_action("peekxd_capture_screen", p).get("result", {}),
-            "mark_elements": lambda p: execute_hermes_action("peekxd_mark_elements", p).get("result", {}),
-            "click": lambda p: execute_hermes_action("peekxd_click", p).get("result", {}),
-            "type": lambda p: execute_hermes_action("peekxd_type", p).get("result", {}),
-            "type_text": lambda p: execute_hermes_action("peekxd_type", p).get("result", {}),
-            "key": lambda p: execute_hermes_action("peekxd_key", p).get("result", {}),
-            "scroll": lambda p: execute_hermes_action("peekxd_scroll", p).get("result", {}),
-            "focus_window": lambda p: execute_hermes_action("peekxd_focus_window", p).get("result", {}),
-            "list_windows": lambda p: execute_hermes_action("peekxd_list_windows", p).get("result", {}),
-            "find_element": lambda p: execute_hermes_action("peekxd_find_element", p).get("result", {}),
+        tool_map = {
+            "click": "peekxd_click",
+            "type": "peekxd_type",
+            "type_text": "peekxd_type",
+            "key": "peekxd_key",
+            "scroll": "peekxd_scroll",
+            "focus_window": "peekxd_focus_window",
+            "list_windows": "peekxd_list_windows",
+            "find_element": "peekxd_inspect_ui",
+            "see_semantic": "peekxd_see_semantic",
         }
 
-        handler = dispatch.get(action)
-        if handler:
-            return handler(params)
+        tool_name = tool_map.get(action)
+        if tool_name:
+            raw = execute_hermes_action(tool_name, params)
+            return json.loads(raw) if isinstance(raw, str) else raw
 
         if action == "wait":
             seconds = params.get("seconds", 1.0)
@@ -854,4 +830,5 @@ If the task is complete, use action "done"."""
 
         Use this when an external LLM has decided which tool to call.
         """
-        return execute_hermes_action(tool_name, params)
+        raw = execute_hermes_action(tool_name, params)
+        return json.loads(raw) if isinstance(raw, str) else raw

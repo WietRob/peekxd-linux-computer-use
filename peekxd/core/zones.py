@@ -118,11 +118,17 @@ class ZoneDecision:
         assert decision.zone == Zone.GHOST
     """
 
-    # Actions that are read-only / observational
+    # Actions that are read-only / observational and do not capture pixels.
     _READONLY_ACTIONS = {
-        "capture_screen", "mark_elements", "list_windows",
-        "find_element", "inspect_ui", "get_ui_tree", "get_active_window",
-        "screenshot", "analyze_screen", "analyze_image",
+        "list_windows",
+        "find_element", "inspect_ui", "get_ui_tree", "get_active_window", "see_semantic",
+    }
+
+    # Removed pixel-capture/vision actions. These must never be classified as
+    # DIRECT just because they used to be observational.
+    _REMOVED_SCREENSHOT_ACTIONS = {
+        "capture_screen", "mark_elements", "screenshot", "analyze_screen", "analyze_image",
+        "find_and_click", "type_into_field", "screen_has_changed",
     }
 
     # Actions that execute with before/after snapshot (Shadow Mode V2)
@@ -167,6 +173,14 @@ class ZoneDecision:
         action = action.strip().lower()
         risk_factors: List[str] = []
 
+        if action in cls._REMOVED_SCREENSHOT_ACTIONS:
+            return RiskDecision(
+                zone=Zone.GHOST,
+                risk_level="blocked",
+                risk_factors=[f"removed_screenshot_action: {action}"],
+                reason="Pixel/screenshot capture actions were removed; use semantic state instead",
+            )
+
         # 1. Check for destructive patterns in text (highest priority)
         text = params.get("text", "")
         if isinstance(text, str):
@@ -200,7 +214,7 @@ class ZoneDecision:
                     risk_factors.append(f"protected_path: {p}")
 
         # 5. Check for unknown actions
-        known_actions = cls._READONLY_ACTIONS | cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS
+        known_actions = cls._READONLY_ACTIONS | cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS | cls._REMOVED_SCREENSHOT_ACTIONS
         if action not in known_actions:
             risk_factors.append(f"unknown_action: {action}")
 

@@ -1,207 +1,43 @@
-"""X11 screenshot provider using ImageMagick ``import`` or ``xwd``."""
+"""Removed screenshot provider stub.
 
-import json
-import re
-from typing import Any, Dict, List, Optional
+Visible screenshot capture was removed from PeekXD because it can trigger
+portal/fullscreen prompts and disturb the user's live desktop. Use
+``peekxd see --semantic`` for non-visual state.
+"""
 
-from ..core.errors import ScreenshotError
-from ..core.utils import executable_available, run_command
 from .base import ScreenshotProvider
+from ..core.errors import ScreenshotError
+
+_REMOVED = "Visible screenshot capture is removed from PeekXD; use `peekxd see --semantic`."
 
 
 class X11Provider(ScreenshotProvider):
-    """Screenshot provider for X11 sessions using ImageMagick or xwd."""
+    """Compatibility stub that never captures pixels."""
 
-    # ------------------------------------------------------------------
-    # Core capture methods
-    # ------------------------------------------------------------------
-
-    def capture_screen(self, output_path: str, display: int = 0) -> str:
-        """Capture the full X11 screen.
-
-        Uses ImageMagick's ``import`` if available, falling back to
-        ``xwd`` piped through ``convert``.
-        """
-        errors = []
-        if executable_available("import"):
-            try:
-                run_command(["import", "-window", "root", "-display", f":{display}", output_path])
-                return output_path
-            except Exception as exc:
-                errors.append(f"import: {exc}")
-        if executable_available("xwd") and executable_available("convert"):
-            try:
-                tmp_xwd = "/tmp/peekxd_screen.xwd"
-                run_command(["xwd", "-root", "-display", f":{display}", "-out", tmp_xwd], check=True)
-                run_command(["convert", tmp_xwd, output_path], check=True)
-                return output_path
-            except Exception as exc:
-                errors.append(f"xwd+convert: {exc}")
-
-        detail = f" Tried: {'; '.join(errors)}" if errors else ""
-        raise ScreenshotError(
-            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
-            + detail,
-        )
-
-    def capture_window(self, output_path: str, window_id: Optional[str] = None) -> str:
-        """Capture a specific X11 window or the active window."""
-        if window_id is None:
-            window_id = self._get_active_window_id()
-            if window_id is None:
-                raise ScreenshotError("Could not determine active window ID.")
-
-        errors = []
-        if executable_available("import"):
-            try:
-                run_command(["import", "-window", window_id, output_path])
-                return output_path
-            except Exception as exc:
-                errors.append(f"import: {exc}")
-        if executable_available("xwd") and executable_available("convert"):
-            try:
-                run_command(["xwd", "-id", window_id, "-out", "/tmp/x11_window.xwd"], check=True)
-                run_command(["convert", "/tmp/x11_window.xwd", output_path], check=True)
-                return output_path
-            except Exception as exc:
-                errors.append(f"xwd+convert: {exc}")
-
-        detail = f" Tried: {'; '.join(errors)}" if errors else ""
-        raise ScreenshotError(
-            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
-            + detail,
-        )
-
-    def capture_region(self, output_path: str, x: int, y: int, width: int, height: int) -> str:
-        """Capture a rectangular region of the X11 screen."""
-        errors = []
-        if executable_available("import"):
-            try:
-                run_command(["import", "-crop", f"{width}x{height}+{x}+{y}", output_path])
-                return output_path
-            except Exception as exc:
-                errors.append(f"import: {exc}")
-        if executable_available("xwd") and executable_available("convert"):
-            try:
-                run_command(["xwd", "-root", "-out", "/tmp/x11_region.xwd"], check=True)
-                run_command([
-                    "convert", "/tmp/x11_region.xwd",
-                    "-crop", f"{width}x{height}+{x}+{y}",
-                    output_path,
-                ], check=True)
-                return output_path
-            except Exception as exc:
-                errors.append(f"xwd+convert: {exc}")
-
-        detail = f" Tried: {'; '.join(errors)}" if errors else ""
-        raise ScreenshotError(
-            "No working X11 capture tool available. Install/fix ImageMagick import or xwd + convert."
-            + detail,
-        )
-
-    # ------------------------------------------------------------------
-    # Window / screen introspection
-    # ------------------------------------------------------------------
-
-    def list_windows(self) -> List[Dict[str, Any]]:
-        """List visible X11 windows with IDs and titles."""
-        windows: List[Dict[str, Any]] = []
-
-        if executable_available("xdotool"):
-            try:
-                result = run_command(
-                    ["xdotool", "search", "--onlyvisible", "--class", "*"],
-                    check=True,
-                )
-                ids = result.stdout.strip().splitlines()
-                for wid in ids:
-                    wid = wid.strip()
-                    if not wid:
-                        continue
-                    title_res = run_command(
-                        ["xdotool", "getwindowname", wid],
-                        check=False,
-                    )
-                    title = title_res.stdout.strip() if title_res.returncode == 0 else ""
-                    windows.append({"id": wid, "title": title})
-            except Exception:
-                pass
-        elif executable_available("xwininfo"):
-            try:
-                result = run_command(["xwininfo", "-root", "-tree"], check=True)
-                windows = self._parse_xwininfo_tree(result.stdout)
-            except Exception:
-                pass
-
-        return windows
-
-    def list_screens(self) -> List[Dict[str, Any]]:
-        """List available X11 screens/displays using xrandr."""
-        screens: List[Dict[str, Any]] = []
-
-        if not executable_available("xrandr"):
-            return screens
-
-        try:
-            result = run_command(["xrandr", "--listmonitors"], check=True)
-            screens = self._parse_xrandr_monitors(result.stdout)
-        except Exception:
-            pass
-
-        return screens
-
-    # ------------------------------------------------------------------
-    # Availability
-    # ------------------------------------------------------------------
+    permission_label = "removed"
 
     @property
     def available(self) -> bool:
-        """True if ImageMagick ``import`` or the full ``xwd`` + ``convert`` chain is installed."""
-        return executable_available("import") or (executable_available("xwd") and executable_available("convert"))
+        return False
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    def capture_screen(self, output_path: str, display: int = 0) -> str:
+        del output_path, display
+        raise ScreenshotError(_REMOVED)
 
-    @staticmethod
-    def _get_active_window_id() -> Optional[str]:
-        """Get the ID of the currently focused X11 window via xdotool."""
-        if not executable_available("xdotool"):
-            return None
-        try:
-            result = run_command(["xdotool", "getactivewindow"], check=True)
-            return result.stdout.strip()
-        except Exception:
-            return None
+    def capture_window(self, output_path: str, window_id=None) -> str:
+        del output_path, window_id
+        raise ScreenshotError(_REMOVED)
 
-    @staticmethod
-    def _parse_xwininfo_tree(output: str) -> List[Dict[str, Any]]:
-        """Parse ``xwininfo -root -tree`` output into window dicts."""
-        windows: List[Dict[str, Any]] = []
-        for line in output.splitlines():
-            match = re.match(r"\s*(0x[0-9a-fA-F]+)\s+\"([^\"]*)\"", line)
-            if match:
-                windows.append({"id": match.group(1), "title": match.group(2)})
-        return windows
+    def capture_region(self, output_path: str, x: int, y: int, width: int, height: int) -> str:
+        del output_path, x, y, width, height
+        raise ScreenshotError(_REMOVED)
 
-    @staticmethod
-    def _parse_xrandr_monitors(output: str) -> List[Dict[str, Any]]:
-        """Parse ``xrandr --listmonitors`` output into screen dicts."""
-        screens: List[Dict[str, Any]] = []
-        for line in output.splitlines():
-            # Skip header line (contains 'Monitors: N')
-            if "Monitors:" in line:
-                continue
-            match = re.match(
-                r"\s*\d+:\s*\+\*?(\S+)\s+(\d+)/(\d+)x(\d+)/(\d+)\+(\d+)\+(\d+)",
-                line,
-            )
-            if match:
-                screens.append({
-                    "name": match.group(1),
-                    "width": int(match.group(2)),
-                    "height": int(match.group(4)),
-                    "x": int(match.group(6)),
-                    "y": int(match.group(7)),
-                })
-        return screens
+    def list_windows(self):
+        return []
+
+    def list_screens(self):
+        return []
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return False

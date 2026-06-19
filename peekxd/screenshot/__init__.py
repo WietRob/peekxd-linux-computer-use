@@ -1,21 +1,28 @@
-"""Screenshot module for peekxd Linux.
+"""Screenshot module compatibility surface.
 
-Provides platform-aware screenshot capture for X11, Wayland, and generic
- desktop environments with automatic provider selection.
+Visible screenshot capture has been removed from PeekXD. Provider classes remain
+importable only as stubs so old imports fail closed instead of triggering pixel
+capture or desktop portal prompts.
 """
 
 from .base import ScreenshotProvider
-from .detector import get_screenshot_provider
+from .detector import REMOVED_SCREENSHOT_MESSAGE, get_screenshot_provider
 from .generic import GenericProvider
+from .pipewire import PipeWireScreenCastProvider
+from .portal import XdgDesktopPortalProvider
 from .wayland import WaylandProvider
-from .windows_wsl import WindowsWslProvider
+from .windows_wsl import WindowsWslProvider, WSLgScreenshotProvider
 from .x11 import X11Provider
 
 __all__ = [
     "ScreenshotProvider",
-    "X11Provider",
+    "REMOVED_SCREENSHOT_MESSAGE",
+    "get_screenshot_provider",
+    "GenericProvider",
+    "PipeWireScreenCastProvider",
+    "XdgDesktopPortalProvider",
     "WaylandProvider",
     "WindowsWslProvider",
-    "GenericProvider",
-    "get_screenshot_provider",
+    "WSLgScreenshotProvider",
+    "X11Provider",
 ]
