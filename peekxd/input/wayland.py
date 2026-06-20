@@ -34,13 +34,28 @@ _YDOTOOLD_SOCKET_PATHS = [
 ]
 
 
+def _ydotoold_socket_paths() -> list[str]:
+    """Return ydotoold socket paths in priority order."""
+    socket_override = os.environ.get("PEEKXD_YDOTOOLD_SOCKET")
+    if socket_override:
+        return [socket_override]
+
+    paths = []
+    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime_dir:
+        paths.append(os.path.join(xdg_runtime_dir, "ydotoold", "socket"))
+
+    paths.extend(_YDOTOOLD_SOCKET_PATHS)
+    return paths
+
+
 def _ydotoold_running() -> bool:
     """Check whether the ydotoold daemon socket is accessible.
 
     ydotool requires the daemon to be running in order to function.
     This checks a few common socket locations.
     """
-    for path in _YDOTOOLD_SOCKET_PATHS:
+    for path in _ydotoold_socket_paths():
         if Path(path).exists():
             return True
     return False
