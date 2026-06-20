@@ -152,9 +152,23 @@ class WlrrandrDisplayProvider(DisplayProvider):
 
 
 def get_display_provider() -> DisplayProvider:
-    """Return the first available read-only display provider."""
+    """Return the first viable read-only display provider.
+
+    Tries each available provider and falls back to the next one if a
+    provider is installed but not operational (e.g. xrandr present on a
+    Wayland-only session).
+    """
     providers: list[DisplayProvider] = [XrandrDisplayProvider(), WlrrandrDisplayProvider()]
+    last_error: Exception | None = None
     for provider in providers:
         if provider.available:
-            return provider
-    raise ProviderNotAvailableError("No display provider available. Install: xrandr or wlr-randr.")
+            try:
+                provider.list_displays()
+                return provider
+            except Exception as exc:
+                last_error = exc
+                continue
+    msg = "No display provider available. Install: xrandr or wlr-randr."
+    if last_error:
+        msg += f" Last error: {last_error}"
+    raise ProviderNotAvailableError(msg)
