@@ -1,0 +1,27 @@
+diff --git a/peekxd/cli.py b/peekxd/cli.py
+index ca3c9d3..bfbb4db 100644
+--- a/peekxd/cli.py
++++ b/peekxd/cli.py
+@@ -215,6 +215,22 @@ def window_resize(window_id, width, height):
+     click.echo(f"Resized window {window_id} to {width}x{height}")
+
+
++@cli.group()
++def display():
++    """Display resolution queries."""
++
++
++@display.command(name="list")
++def display_list():
++    """List connected displays and resolutions."""
++    from .display import get_display_provider
++
++    displays = get_display_provider().list_displays()
++    for item in displays:
++        suffix = " primary" if item.primary else ""
++        click.echo(f"{item.name}: {item.width}x{item.height}+{item.x}+{item.y}{suffix}")
++
++
+ @cli.group()
+ def inspect():
+     """UI inspection."""
