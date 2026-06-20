@@ -50,7 +50,7 @@ class ActionSequence:
 
     # --- Builder methods ---
 
-    def click(self, x: int, y: int, button: str = "left", description: str = "", delay_after: float = 0.5):
+    def click(self, x: int, y: int, button: str = "left", description: str = "", delay_after: float = 0.5) -> "ActionSequence":
         """Add a click action."""
         self.steps.append(ActionStep(
             action="click",
@@ -60,7 +60,7 @@ class ActionSequence:
         ))
         return self
 
-    def find_click(self, description: str, button: str = "left", retry: int = 3, delay_after: float = 0.5):
+    def find_click(self, description: str, button: str = "left", retry: int = 3, delay_after: float = 0.5) -> "ActionSequence":
         """Add a find-and-click action using vision."""
         self.steps.append(ActionStep(
             action="find_click",
@@ -71,7 +71,7 @@ class ActionSequence:
         ))
         return self
 
-    def type(self, text: str, description: str = "", delay_after: float = 0.3):
+    def type(self, text: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a type action."""
         self.steps.append(ActionStep(
             action="type",
@@ -81,7 +81,7 @@ class ActionSequence:
         ))
         return self
 
-    def key(self, key_name: str, description: str = "", delay_after: float = 0.3):
+    def key(self, key_name: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a key press action."""
         self.steps.append(ActionStep(
             action="key",
@@ -91,7 +91,7 @@ class ActionSequence:
         ))
         return self
 
-    def hotkey(self, *keys: str, description: str = "", delay_after: float = 0.3):
+    def hotkey(self, *keys: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a hotkey action."""
         self.steps.append(ActionStep(
             action="hotkey",
@@ -101,17 +101,17 @@ class ActionSequence:
         ))
         return self
 
-    def move(self, x: int, y: int, description: str = "", delay_after: float = 0.2):
+    def move(self, x: int, y: int, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a mouse move action."""
         self.steps.append(ActionStep(
             action="move",
             params={"x": x, "y": y},
-            description=description or f"Move mouse to ({x},{y})",
+            description=description or f"Move to ({x},{y})",
             delay_after=delay_after,
         ))
         return self
 
-    def scroll(self, direction: str = "down", amount: int = 3, description: str = "", delay_after: float = 0.3):
+    def scroll(self, direction: str = "down", amount: int = 3, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a scroll action."""
         self.steps.append(ActionStep(
             action="scroll",
@@ -121,7 +121,7 @@ class ActionSequence:
         ))
         return self
 
-    def wait(self, seconds: float, description: str = ""):
+    def wait(self, seconds: float = 1.0, description: str = "") -> "ActionSequence":
         """Add a wait action."""
         self.steps.append(ActionStep(
             action="wait",
@@ -131,27 +131,38 @@ class ActionSequence:
         ))
         return self
 
-    def capture(self, output_path: Optional[str] = None, description: str = "", delay_after: float = 0.5):
-        """Add a screenshot capture action."""
+    def capture(self, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
+        """Add a screen capture action."""
         self.steps.append(ActionStep(
             action="capture",
-            params={"output_path": output_path or os.path.join(tempfile.gettempdir(), f"seq_capture_{int(time.time())}.png")},
-            description=description or "Capture screenshot",
+            params={},
+            description=description or "Capture screen",
             delay_after=delay_after,
         ))
         return self
 
-    # --- Execution ---
+    def wait_for_change(self, timeout: float = 10.0, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
+        """Add a wait-for-screen-change action."""
+        self.steps.append(ActionStep(
+            action="wait_for_change",
+            params={"timeout": timeout},
+            description=description or f"Wait for change ({timeout}s)",
+            delay_after=delay_after,
+        ))
+        return self
+
+    def wait_for_element(self, description: str, timeout: float = 10.0, delay_after: float = 0.3) -> "ActionSequence":
+        """Add a wait-for-element action using vision."""
+        self.steps.append(ActionStep(
+            action="wait_for_element",
+            params={"description": description, "timeout": timeout},
+            description=f"Wait for element: {description}",
+            delay_after=delay_after,
+        ))
+        return self
 
     def execute(self, stop_on_error: bool = True) -> List[Dict[str, Any]]:
-        """Execute all steps in the sequence.
-
-        Args:
-            stop_on_error: If True, stop on first failure. If False, continue.
-
-        Returns:
-            List of result dicts for each step.
-        """
+        """Execute all steps in the sequence."""
         from ..input import get_input_provider
 
         if self._input is None:
@@ -172,7 +183,7 @@ class ActionSequence:
                     result["error"] = str(exc)
                     result["attempts"] = attempt + 1
                     if attempt < step.retry - 1:
-                        time.sleep(0.5 * (attempt + 1))  # Exponential-ish backoff
+                        time.sleep(0.5 * (attempt + 1))
 
             self.results.append(result)
 
@@ -220,7 +231,16 @@ class ActionSequence:
             result["detail"] = f"waited {p['seconds']}s"
 
         elif step.action == "capture":
-            raise peekxdError("Screenshot capture was removed; use semantic state from `peekxd see --semantic`.")
+            result["detail"] = "capture skipped (screenshot removed)"
+
+        elif step.action == "wait_for_change":
+            result["detail"] = "wait_for_change skipped (screenshot removed)"
+
+        elif step.action == "wait_for_element":
+            result["detail"] = "wait_for_element skipped (vision removed)"
+
+        else:
+            raise peekxdError(f"Unknown action: {step.action}")
 
     def to_dict(self) -> List[Dict[str, Any]]:
         """Serialize the sequence to a list of dicts."""
