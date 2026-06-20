@@ -280,13 +280,45 @@ class TestWaylandAvailability:
     def test_ydotoold_running_checks_socket_paths(self, mock_exists: MagicMock) -> None:
         """The daemon check should iterate through known socket paths."""
         mock_exists.side_effect = [False, False, True]  # third path exists
-        result = _ydotoold_running()
+        with patch.dict(os.environ, {}, clear=True):
+            result = _ydotoold_running()
         assert result is True
         assert mock_exists.call_count == 3
 
+    @patch("peekxd.input.wayland.Path")
+    def test_ydotoold_running_uses_socket_env_override(self, mock_path: MagicMock) -> None:
+        """PEEKXD_YDOTOOLD_SOCKET should override the default socket search."""
+        mock_path.return_value.exists.return_value = True
+
+        with patch.dict(os.environ, {"PEEKXD_YDOTOOLD_SOCKET": "/custom/ydotoold.sock"}, clear=True):
+            result = _ydotoold_running()
+
+        assert result is True
+        mock_path.assert_called_once_with("/custom/ydotoold.sock")
+
+    @patch("peekxd.input.wayland.Path")
+    def test_ydotoold_running_checks_xdg_runtime_dir_socket(self, mock_path: MagicMock) -> None:
+        """XDG_RUNTIME_DIR should contribute the per-user ydotoold socket path."""
+        seen_paths: list[str] = []
+
+        def make_path(path: str) -> MagicMock:
+            seen_paths.append(path)
+            candidate = MagicMock()
+            candidate.exists.return_value = path == "/run/user/1234/ydotoold/socket"
+            return candidate
+
+        mock_path.side_effect = make_path
+
+        with patch.dict(os.environ, {"XDG_RUNTIME_DIR": "/run/user/1234"}, clear=True):
+            result = _ydotoold_running()
+
+        assert result is True
+        assert seen_paths[0] == "/run/user/1234/ydotoold/socket"
+
     @patch("peekxd.input.wayland.Path.exists", return_value=False)
     def test_ydotoold_running_returns_false_when_no_socket(self, mock_exists: MagicMock) -> None:
-        result = _ydotoold_running()
+        with patch.dict(os.environ, {}, clear=True):
+            result = _ydotoold_running()
         assert result is False
 
 
