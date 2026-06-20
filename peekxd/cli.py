@@ -216,6 +216,22 @@ def window_resize(window_id, width, height):
 
 
 @cli.group()
+def display():
+    """Display resolution queries."""
+
+
+@display.command(name="list")
+def display_list():
+    """List connected displays and resolutions."""
+    from .display import get_display_provider
+
+    displays = get_display_provider().list_displays()
+    for item in displays:
+        suffix = " primary" if item.primary else ""
+        click.echo(f"{item.name}: {item.width}x{item.height}+{item.x}+{item.y}{suffix}")
+
+
+@cli.group()
 def inspect():
     """UI inspection."""
 
