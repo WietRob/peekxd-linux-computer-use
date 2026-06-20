@@ -218,6 +218,75 @@ class TestCLI:
         assert "Visible screenshot capture is removed" in result.output
         provider.capture_region.assert_not_called()
 
+    def test_inspect_tree_command(self, mock_submodules, runner):
+        """inspect tree command invokes the inspection provider."""
+        from peekxd.inspection.base import UIElement
+        mock_provider = MagicMock()
+        mock_provider.get_ui_tree.return_value = [
+            UIElement(
+                id="0:1",
+                name="Search",
+                role="button",
+                position=(10, 20),
+                size=(30, 40),
+                parent=None,
+                children=[],
+                attributes={},
+            )
+        ]
+        
+        with patch("peekxd.inspection.get_inspection_provider", return_value=mock_provider):
+            result = runner.invoke(cli, ["inspect", "tree", "--app", "test-app"])
+        assert result.exit_code == 0
+        assert "button" in result.output or "Search" in result.output
+        mock_provider.get_ui_tree.assert_called_once_with("test-app")
+
+    def test_inspect_find_command(self, mock_submodules, runner):
+        """inspect find command invokes the inspection provider."""
+        from peekxd.inspection.base import UIElement
+        mock_provider = MagicMock()
+        mock_provider.find_element.return_value = UIElement(
+            id="0:1",
+            name="Submit",
+            role="button",
+            position=(100, 200),
+            size=(50, 30),
+            parent=None,
+            children=[],
+            attributes={},
+        )
+        
+        with patch("peekxd.inspection.get_inspection_provider", return_value=mock_provider):
+            result = runner.invoke(cli, ["inspect", "find", "--name", "Submit", "--role", "button"])
+        assert result.exit_code == 0
+        assert "Submit" in result.output or "button" in result.output or "Found" in result.output
+        mock_provider.find_element.assert_called_once_with(name="Submit", role="button")
+
+    def test_analyze_command(self, mock_submodules, runner):
+        """analyze command invokes the vision provider."""
+        mock_provider = MagicMock()
+        mock_provider.analyze.return_value = "A button labeled OK"
+        
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+            f.write(b"fake image")
+            tmp_path = f.name
+        
+        try:
+            with patch("peekxd.vision.get_vision_provider", return_value=mock_provider):
+                result = runner.invoke(cli, ["analyze", tmp_path, "What is this?"])
+            assert result.exit_code == 0
+            assert "button" in result.output or "OK" in result.output
+        finally:
+            import os
+            os.unlink(tmp_path)
+
+    def test_config_get_command(self, mock_submodules, runner):
+        """config get command retrieves a config value."""
+        result = runner.invoke(cli, ["config", "get", "screenshot.format"])
+        assert result.exit_code == 0
+        assert "jpg" in result.output or "png" in result.output or "format" in result.output
+
     def test_permissions(self, mock_submodules, runner):
         """permissions command lists checks."""
         result = runner.invoke(cli, ["permissions"])
