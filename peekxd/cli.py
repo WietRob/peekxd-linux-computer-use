@@ -231,6 +231,25 @@ def display_list():
         click.echo(f"{item.name}: {item.width}x{item.height}+{item.x}+{item.y}{suffix}")
 
 
+@cli.command(name="notify")
+@click.argument("title")
+@click.option("--body", default="", help="Notification body text")
+@click.option("--urgency", default="normal", type=click.Choice(["low", "normal", "critical"]))
+@click.option("--expire-timeout", type=int, help="Notification timeout in milliseconds")
+def notify(title, body, urgency, expire_timeout):
+    """Send a desktop notification."""
+    from .notification import Notification, get_notification_provider
+
+    notification = Notification(
+        title=title,
+        body=body,
+        urgency=urgency,
+        expire_timeout=expire_timeout,
+    )
+    get_notification_provider().send(notification)
+    click.echo(f"Notification sent: {title}")
+
+
 @cli.group()
 def inspect():
     """UI inspection."""
