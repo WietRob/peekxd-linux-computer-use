@@ -72,8 +72,23 @@ class SemanticElement:
         input_provider.type_text(text)
         return x, y
 
+    def state_diff(self, other: "SemanticElement") -> Dict[str, Dict[str, Any]]:
+        """Return state keys added, removed, or changed between two elements."""
+        before = dict(self.state or {})
+        after = dict(other.state or {})
+        changed = {
+            key: {"old": before[key], "new": after[key]}
+            for key in sorted(before.keys() & after.keys())
+            if before[key] != after[key]
+        }
+        added = {key: after[key] for key in sorted(after.keys() - before.keys())}
+        removed = {key: before[key] for key in sorted(before.keys() - after.keys())}
+        return {"changed": changed, "added": added, "removed": removed}
 
-def _geometry_from_mapping(raw: Dict[str, Any]) -> Geometry:
+
+def _geometry_from_mapping(raw: Any) -> Geometry:
+    if isinstance(raw, Geometry):
+        return raw
     return Geometry(
         x=int(raw.get("x", 0) or 0),
         y=int(raw.get("y", 0) or 0),
@@ -106,6 +121,93 @@ def find_semantic_element(envelope: Dict[str, Any], element_id: str) -> Semantic
         if raw.get("element_id") == element_id:
             return semantic_element_from_mapping(raw)
     raise ValueError(f"semantic element not found: {element_id}")
+
+
+def _coerce_semantic_elements(snapshot: Any) -> List[SemanticElement]:
+    """Normalize a semantic envelope, raw element mapping list, or element list."""
+    if isinstance(snapshot, dict):
+        raw_elements = snapshot.get("snapshot", {}).get("elements", []) or []
+    else:
+        raw_elements = snapshot or []
+
+    elements: List[SemanticElement] = []
+    for raw in raw_elements:
+        if isinstance(raw, SemanticElement):
+            elements.append(raw)
+        else:
+            elements.append(semantic_element_from_mapping(raw))
+    return elements
+
+
+def snapshot_diff(old: Any, new: Any) -> Dict[str, Any]:
+    """Compare two semantic snapshots and report element-level state changes.
+
+    ``old`` and ``new`` may each be a semantic envelope, a list of
+    ``SemanticElement`` instances, or a list of serialized element mappings.
+    """
+    old_by_id = {element.element_id: element for element in _coerce_semantic_elements(old)}
+    new_by_id = {element.element_id: element for element in _coerce_semantic_elements(new)}
+
+    changed: Dict[str, Dict[str, Any]] = {}
+    unchanged: List[str] = []
+    for element_id in sorted(old_by_id.keys() & new_by_id.keys()):
+        state_change = old_by_id[element_id].state_diff(new_by_id[element_id])
+        if any(state_change[section] for section in ("changed", "added", "removed")):
+            changed[element_id] = state_change
+        else:
+            unchanged.append(element_id)
+
+    return {
+        "changed": changed,
+        "added": sorted(new_by_id.keys() - old_by_id.keys()),
+        "removed": sorted(old_by_id.keys() - new_by_id.keys()),
+        "unchanged": unchanged,
+    }
+
+
+def wait_for_state_change(
+    element_id: str,
+    expected_state: Dict[str, Any],
+    timeout: float,
+    poll_interval: float = 0.5,
+    *,
+    snapshot_builder: Any = None,
+    sleeper: Any = time.sleep,
+    monotonic: Any = time.monotonic,
+    **snapshot_kwargs: Any,
+) -> SemanticElement:
+    """Poll semantic snapshots until an element reaches the expected state.
+
+    Returns the matching element. Raises ``TimeoutError`` when the expected
+    state does not appear before ``timeout`` seconds elapse.
+    """
+    if snapshot_builder is None:
+        snapshot_builder = build_semantic_snapshot
+    if timeout < 0:
+        raise ValueError("timeout must be greater than or equal to zero")
+    if poll_interval < 0:
+        raise ValueError("poll_interval must be greater than or equal to zero")
+
+    expected = dict(expected_state or {})
+    deadline = monotonic() + float(timeout)
+    last_state: Optional[Dict[str, Any]] = None
+    while True:
+        snapshot = snapshot_builder(**snapshot_kwargs)
+        try:
+            element = find_semantic_element(snapshot, element_id)
+            last_state = dict(element.state or {})
+            if all(element.state.get(key) == value for key, value in expected.items()):
+                return element
+        except ValueError:
+            last_state = None
+
+        if monotonic() >= deadline:
+            expected_text = ", ".join(f"{key}={value!r}" for key, value in sorted(expected.items()))
+            raise TimeoutError(
+                f"timed out waiting for {element_id} to reach {expected_text}; last_state={last_state}"
+            )
+        if poll_interval:
+            sleeper(poll_interval)
 
 
 def _snapshot_id(now: Optional[datetime] = None) -> str:
