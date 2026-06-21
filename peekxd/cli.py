@@ -116,22 +116,46 @@ def see_capture(ctx, app, output, analyze):
 
 
 @cli.command(name="click")
-@click.argument("x", type=int)
-@click.argument("y", type=int)
+@click.argument("x", type=int, required=False)
+@click.argument("y", type=int, required=False)
+@click.option("--on", "element_id", help="Semantic element id to click, e.g. W1-B1")
 @click.option("--button", default="left", type=click.Choice(["left", "right", "middle"]))
-def click_cmd(x, y, button):
-    """Click at X Y."""
+def click_cmd(x, y, element_id, button):
+    """Click at X Y or on semantic element id."""
     from .input import get_input_provider
-    get_input_provider().click(x, y, button)
+
+    input_provider = get_input_provider()
+    if element_id:
+        from .semantic import build_semantic_snapshot, find_semantic_element
+
+        element = find_semantic_element(build_semantic_snapshot(), element_id)
+        x, y = element.click_center(input_provider, button=button)
+        click.echo(f"Clicked {button} on {element_id} at {x},{y}")
+        return
+
+    if x is None or y is None:
+        raise click.UsageError("X and Y are required unless --on is provided")
+    input_provider.click(x, y, button)
     click.echo(f"Clicked {button} at {x},{y}")
 
 
 @cli.command(name="type")
 @click.argument("text")
-def type_cmd(text):
-    """Type TEXT."""
+@click.option("--on", "element_id", help="Semantic element id to focus before typing, e.g. W1-T1")
+def type_cmd(text, element_id):
+    """Type TEXT, optionally into a semantic element id."""
     from .input import get_input_provider
-    get_input_provider().type_text(text)
+
+    input_provider = get_input_provider()
+    if element_id:
+        from .semantic import build_semantic_snapshot, find_semantic_element
+
+        element = find_semantic_element(build_semantic_snapshot(), element_id)
+        x, y = element.type_into(input_provider, text)
+        click.echo(f"Typed into {element_id} at {x},{y}: {text}")
+        return
+
+    input_provider.type_text(text)
     click.echo(f"Typed: {text}")
 
 

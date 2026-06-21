@@ -1,0 +1,101 @@
+diff --git a/peekxd/cli.py b/peekxd/cli.py
+index d7ade38..883f81d 100644
+--- a/peekxd/cli.py
++++ b/peekxd/cli.py
+@@ -116,22 +116,46 @@ def see_capture(ctx, app, output, analyze):
+ 
+ 
+ @cli.command(name="click")
+-@click.argument("x", type=int)
+-@click.argument("y", type=int)
++@click.argument("x", type=int, required=False)
++@click.argument("y", type=int, required=False)
++@click.option("--on", "element_id", help="Semantic element id to click, e.g. W1-B1")
+ @click.option("--button", default="left", type=click.Choice(["left", "right", "middle"]))
+-def click_cmd(x, y, button):
+-    """Click at X Y."""
++def click_cmd(x, y, element_id, button):
++    """Click at X Y or on semantic element id."""
+     from .input import get_input_provider
+-    get_input_provider().click(x, y, button)
++
++    input_provider = get_input_provider()
++    if element_id:
++        from .semantic import build_semantic_snapshot, find_semantic_element
++
++        element = find_semantic_element(build_semantic_snapshot(), element_id)
++        x, y = element.click_center(input_provider, button=button)
++        click.echo(f"Clicked {button} on {element_id} at {x},{y}")
++        return
++
++    if x is None or y is None:
++        raise click.UsageError("X and Y are required unless --on is provided")
++    input_provider.click(x, y, button)
+     click.echo(f"Clicked {button} at {x},{y}")
+ 
+ 
+ @cli.command(name="type")
+ @click.argument("text")
+-def type_cmd(text):
+-    """Type TEXT."""
++@click.option("--on", "element_id", help="Semantic element id to focus before typing, e.g. W1-T1")
++def type_cmd(text, element_id):
++    """Type TEXT, optionally into a semantic element id."""
+     from .input import get_input_provider
+-    get_input_provider().type_text(text)
++
++    input_provider = get_input_provider()
++    if element_id:
++        from .semantic import build_semantic_snapshot, find_semantic_element
++
++        element = find_semantic_element(build_semantic_snapshot(), element_id)
++        x, y = element.type_into(input_provider, text)
++        click.echo(f"Typed into {element_id} at {x},{y}: {text}")
++        return
++
++    input_provider.type_text(text)
+     click.echo(f"Typed: {text}")
+ 
+ 
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 50ca6f7..c70746f 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -117,6 +117,37 @@ class TestCLI:
+         assert "Typed: hello world" in result.output
+         provider.type_text.assert_called_once_with("hello world")
+ 
++    def test_click_on_element_uses_semantic_bbox_center(self, mock_submodules, runner):
++        """click --on resolves an element id and clicks its bbox center."""
++        from peekxd.inspection.base import UIElement
++
++        input_provider = mock_submodules["peekxd.input"]
++        mock_submodules["peekxd.inspection"].get_ui_tree.return_value = [
++            UIElement("raw-button", "Submit", "button", (10, 20), (30, 40), None, [], {})
++        ]
++
++        result = runner.invoke(cli, ["click", "--on", "W1-B1", "--button", "right"])
++
++        assert result.exit_code == 0, result.output
++        assert "Clicked right on W1-B1 at 25,40" in result.output
++        input_provider.click.assert_called_once_with(25, 40, "right")
++
++    def test_type_on_element_clicks_semantic_bbox_center_then_types(self, mock_submodules, runner):
++        """type --on resolves an element id, focuses it, then types text."""
++        from peekxd.inspection.base import UIElement
++
++        input_provider = mock_submodules["peekxd.input"]
++        mock_submodules["peekxd.inspection"].get_ui_tree.return_value = [
++            UIElement("raw-text", "Search", "text", (5, 6), (100, 20), None, [], {})
++        ]
++
++        result = runner.invoke(cli, ["type", "hello world", "--on", "W1-T1"])
++
++        assert result.exit_code == 0, result.output
++        assert "Typed into W1-T1 at 55,16: hello world" in result.output
++        input_provider.click.assert_called_once_with(55, 16, "left")
++        input_provider.type_text.assert_called_once_with("hello world")
++
+     def test_key_command(self, mock_submodules, runner):
+         """key command invokes the input provider."""
+         provider = mock_submodules["peekxd.input"]

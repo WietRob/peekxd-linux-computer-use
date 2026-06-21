@@ -117,6 +117,37 @@ class TestCLI:
         assert "Typed: hello world" in result.output
         provider.type_text.assert_called_once_with("hello world")
 
+    def test_click_on_element_uses_semantic_bbox_center(self, mock_submodules, runner):
+        """click --on resolves an element id and clicks its bbox center."""
+        from peekxd.inspection.base import UIElement
+
+        input_provider = mock_submodules["peekxd.input"]
+        mock_submodules["peekxd.inspection"].get_ui_tree.return_value = [
+            UIElement("raw-button", "Submit", "button", (10, 20), (30, 40), None, [], {})
+        ]
+
+        result = runner.invoke(cli, ["click", "--on", "W1-B1", "--button", "right"])
+
+        assert result.exit_code == 0, result.output
+        assert "Clicked right on W1-B1 at 25,40" in result.output
+        input_provider.click.assert_called_once_with(25, 40, "right")
+
+    def test_type_on_element_clicks_semantic_bbox_center_then_types(self, mock_submodules, runner):
+        """type --on resolves an element id, focuses it, then types text."""
+        from peekxd.inspection.base import UIElement
+
+        input_provider = mock_submodules["peekxd.input"]
+        mock_submodules["peekxd.inspection"].get_ui_tree.return_value = [
+            UIElement("raw-text", "Search", "text", (5, 6), (100, 20), None, [], {})
+        ]
+
+        result = runner.invoke(cli, ["type", "hello world", "--on", "W1-T1"])
+
+        assert result.exit_code == 0, result.output
+        assert "Typed into W1-T1 at 55,16: hello world" in result.output
+        input_provider.click.assert_called_once_with(55, 16, "left")
+        input_provider.type_text.assert_called_once_with("hello world")
+
     def test_key_command(self, mock_submodules, runner):
         """key command invokes the input provider."""
         provider = mock_submodules["peekxd.input"]
