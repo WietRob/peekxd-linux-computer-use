@@ -1,0 +1,377 @@
+diff --git a/.ai/evidence/semantic-element-state-change-detection/evidence.md b/.ai/evidence/semantic-element-state-change-detection/evidence.md
+new file mode 100644
+index 0000000..b7e8b4f
+--- /dev/null
++++ b/.ai/evidence/semantic-element-state-change-detection/evidence.md
+@@ -0,0 +1,31 @@
++# Evidence
++
++Candidate: semantic-element-state-change-detection
++Task: t_79adce02
++Branch: autonomy/peekxd/semantic-element-state-change-detection-20260621
++
++## What changed
++
++Implemented additive semantic state-change utilities in `peekxd/semantic.py`:
++
++- `SemanticElement.state_diff(other)` reports added, removed, and changed state keys.
++- `snapshot_diff(old, new)` compares two semantic snapshots or element lists by `element_id` and reports changed, added, removed, and unchanged elements.
++- `wait_for_state_change(element_id, expected_state, timeout, poll_interval=0.5, ...)` polls semantic snapshots until an element reaches expected state values, then returns the matching `SemanticElement`.
++- `_geometry_from_mapping()` now accepts existing `Geometry` instances so serialized-like in-memory element dictionaries can be rehydrated safely.
++
++Added `tests/test_semantic_state_change.py` covering state diffs, snapshot diffs, envelope inputs, successful polling, and timeout behavior.
++
++## Why
++
++The Cycle 9 dreamer input identified a gap: PeekXD had semantic element `state` data but no utility for comparing two semantic snapshots or waiting for an element-level state transition. The implementation is bounded and additive to semantic utilities only.
++
++## Constraints checked
++
++- Exactly one candidate implemented: `semantic-element-state-change-detection`.
++- Product files touched: `peekxd/semantic.py` and `tests/test_semantic_state_change.py`.
++- No main branch edits; work was performed in isolated worktree `/home/wietrob/.hermes/kanban/boards/curaops-vrp/workspaces/t_79adce02/peekxd-linux-computer-use`.
++- No force-push and no revert executed.
++
++## Verification
++
++See `tests.md` in this directory.
+diff --git a/.ai/evidence/semantic-element-state-change-detection/rollback.md b/.ai/evidence/semantic-element-state-change-detection/rollback.md
+new file mode 100644
+index 0000000..bbcfe63
+--- /dev/null
++++ b/.ai/evidence/semantic-element-state-change-detection/rollback.md
+@@ -0,0 +1,45 @@
++# Rollback Plan
++
++Candidate: semantic-element-state-change-detection
++Branch: autonomy/peekxd/semantic-element-state-change-detection-20260621
++
++## Preferred rollback after merge
++
++Revert the candidate commit on a new branch after human approval:
++
++```bash
++git checkout main
++git pull origin main
++git checkout -b rollback/semantic-element-state-change-detection-20260621
++git revert <commit-hash>
++python3 -m pytest tests/ -q
++git push -u origin HEAD
++```
++
++Do not run `git revert` without human approval under the buildroom no-revert policy.
++
++## Manual rollback before merge
++
++If this branch has not been merged, close the PR and delete the branch:
++
++```bash
++git push origin --delete autonomy/peekxd/semantic-element-state-change-detection-20260621
++git worktree remove /home/wietrob/.hermes/kanban/boards/curaops-vrp/workspaces/t_79adce02/peekxd-linux-computer-use
++```
++
++## Patch-level rollback
++
++Remove these additions:
++
++- `SemanticElement.state_diff()` from `peekxd/semantic.py`
++- `_coerce_semantic_elements()` from `peekxd/semantic.py`
++- `snapshot_diff()` from `peekxd/semantic.py`
++- `wait_for_state_change()` from `peekxd/semantic.py`
++- the `Geometry` passthrough branch in `_geometry_from_mapping()` if no longer needed
++- `tests/test_semantic_state_change.py`
++
++Then verify:
++
++```bash
++python3 -m pytest tests/ -q
++```
+diff --git a/.ai/evidence/semantic-element-state-change-detection/tests.md b/.ai/evidence/semantic-element-state-change-detection/tests.md
+new file mode 100644
+index 0000000..8ac105b
+--- /dev/null
++++ b/.ai/evidence/semantic-element-state-change-detection/tests.md
+@@ -0,0 +1,49 @@
++# Test Plan and Results
++
++Candidate: semantic-element-state-change-detection
++Branch: autonomy/peekxd/semantic-element-state-change-detection-20260621
++
++## RED
++
++Command:
++
++```bash
++python3 -m pytest tests/test_semantic_state_change.py -q
++```
++
++Result before implementation: failed during collection because `snapshot_diff` was not importable from `peekxd.semantic`.
++
++Relevant output:
++
++```text
++ImportError: cannot import name 'snapshot_diff' from 'peekxd.semantic'
++1 error in 0.07s
++```
++
++## GREEN / targeted tests
++
++Command:
++
++```bash
++python3 -m pytest tests/test_semantic_state_change.py -q
++```
++
++Result after implementation:
++
++```text
++5 passed in 0.01s
++```
++
++## Regression suite
++
++Command:
++
++```bash
++python3 -m pytest tests/ -q
++```
++
++Result:
++
++```text
++486 passed in 2.34s
++```
+diff --git a/peekxd/semantic.py b/peekxd/semantic.py
+index af88fbc..1186a00 100644
+--- a/peekxd/semantic.py
++++ b/peekxd/semantic.py
+@@ -72,8 +72,23 @@ class SemanticElement:
+         input_provider.type_text(text)
+         return x, y
+ 
++    def state_diff(self, other: "SemanticElement") -> Dict[str, Dict[str, Any]]:
++        """Return state keys added, removed, or changed between two elements."""
++        before = dict(self.state or {})
++        after = dict(other.state or {})
++        changed = {
++            key: {"old": before[key], "new": after[key]}
++            for key in sorted(before.keys() & after.keys())
++            if before[key] != after[key]
++        }
++        added = {key: after[key] for key in sorted(after.keys() - before.keys())}
++        removed = {key: before[key] for key in sorted(before.keys() - after.keys())}
++        return {"changed": changed, "added": added, "removed": removed}
++
+ 
+-def _geometry_from_mapping(raw: Dict[str, Any]) -> Geometry:
++def _geometry_from_mapping(raw: Any) -> Geometry:
++    if isinstance(raw, Geometry):
++        return raw
+     return Geometry(
+         x=int(raw.get("x", 0) or 0),
+         y=int(raw.get("y", 0) or 0),
+@@ -108,6 +123,93 @@ def find_semantic_element(envelope: Dict[str, Any], element_id: str) -> Semantic
+     raise ValueError(f"semantic element not found: {element_id}")
+ 
+ 
++def _coerce_semantic_elements(snapshot: Any) -> List[SemanticElement]:
++    """Normalize a semantic envelope, raw element mapping list, or element list."""
++    if isinstance(snapshot, dict):
++        raw_elements = snapshot.get("snapshot", {}).get("elements", []) or []
++    else:
++        raw_elements = snapshot or []
++
++    elements: List[SemanticElement] = []
++    for raw in raw_elements:
++        if isinstance(raw, SemanticElement):
++            elements.append(raw)
++        else:
++            elements.append(semantic_element_from_mapping(raw))
++    return elements
++
++
++def snapshot_diff(old: Any, new: Any) -> Dict[str, Any]:
++    """Compare two semantic snapshots and report element-level state changes.
++
++    ``old`` and ``new`` may each be a semantic envelope, a list of
++    ``SemanticElement`` instances, or a list of serialized element mappings.
++    """
++    old_by_id = {element.element_id: element for element in _coerce_semantic_elements(old)}
++    new_by_id = {element.element_id: element for element in _coerce_semantic_elements(new)}
++
++    changed: Dict[str, Dict[str, Any]] = {}
++    unchanged: List[str] = []
++    for element_id in sorted(old_by_id.keys() & new_by_id.keys()):
++        state_change = old_by_id[element_id].state_diff(new_by_id[element_id])
++        if any(state_change[section] for section in ("changed", "added", "removed")):
++            changed[element_id] = state_change
++        else:
++            unchanged.append(element_id)
++
++    return {
++        "changed": changed,
++        "added": sorted(new_by_id.keys() - old_by_id.keys()),
++        "removed": sorted(old_by_id.keys() - new_by_id.keys()),
++        "unchanged": unchanged,
++    }
++
++
++def wait_for_state_change(
++    element_id: str,
++    expected_state: Dict[str, Any],
++    timeout: float,
++    poll_interval: float = 0.5,
++    *,
++    snapshot_builder: Any = None,
++    sleeper: Any = time.sleep,
++    monotonic: Any = time.monotonic,
++    **snapshot_kwargs: Any,
++) -> SemanticElement:
++    """Poll semantic snapshots until an element reaches the expected state.
++
++    Returns the matching element. Raises ``TimeoutError`` when the expected
++    state does not appear before ``timeout`` seconds elapse.
++    """
++    if snapshot_builder is None:
++        snapshot_builder = build_semantic_snapshot
++    if timeout < 0:
++        raise ValueError("timeout must be greater than or equal to zero")
++    if poll_interval < 0:
++        raise ValueError("poll_interval must be greater than or equal to zero")
++
++    expected = dict(expected_state or {})
++    deadline = monotonic() + float(timeout)
++    last_state: Optional[Dict[str, Any]] = None
++    while True:
++        snapshot = snapshot_builder(**snapshot_kwargs)
++        try:
++            element = find_semantic_element(snapshot, element_id)
++            last_state = dict(element.state or {})
++            if all(element.state.get(key) == value for key, value in expected.items()):
++                return element
++        except ValueError:
++            last_state = None
++
++        if monotonic() >= deadline:
++            expected_text = ", ".join(f"{key}={value!r}" for key, value in sorted(expected.items()))
++            raise TimeoutError(
++                f"timed out waiting for {element_id} to reach {expected_text}; last_state={last_state}"
++            )
++        if poll_interval:
++            sleeper(poll_interval)
++
++
+ def _snapshot_id(now: Optional[datetime] = None) -> str:
+     now = now or datetime.now(timezone.utc)
+     return f"snap_{now.strftime('%Y%m%d')}_{secrets.token_urlsafe(8)[:10].lower()}"
+diff --git a/tests/test_semantic_state_change.py b/tests/test_semantic_state_change.py
+new file mode 100644
+index 0000000..497143f
+--- /dev/null
++++ b/tests/test_semantic_state_change.py
+@@ -0,0 +1,105 @@
++"""Tests for semantic snapshot state-change detection."""
++
++import pytest
++
++from peekxd.semantic import (
++    Geometry,
++    SemanticElement,
++    snapshot_diff,
++    wait_for_state_change,
++)
++
++
++def _element(element_id, state, *, role="button", actions=None):
++    return SemanticElement(
++        element_id=element_id,
++        raw_element_id=f"raw-{element_id}",
++        window_id="W1",
++        role=role,
++        name=element_id,
++        label=element_id,
++        bbox=Geometry(x=0, y=0, width=10, height=10),
++        state=state,
++        actions=actions or ["click"],
++        path=f"W1 > {role}[{element_id}]",
++        confidence=0.9,
++    )
++
++
++def test_semantic_element_state_diff_reports_added_removed_and_changed_values():
++    before = _element("W1-B1", {"enabled": True, "focused": False, "stale": "gone"})
++    after = _element("W1-B1", {"enabled": False, "focused": False, "checked": True})
++
++    assert before.state_diff(after) == {
++        "changed": {"enabled": {"old": True, "new": False}},
++        "added": {"checked": True},
++        "removed": {"stale": "gone"},
++    }
++
++
++def test_snapshot_diff_reports_added_removed_and_state_changed_elements():
++    before = [
++        _element("W1-B1", {"enabled": True}),
++        _element("W1-T1", {"focused": False}, role="text", actions=["focus", "type"]),
++        _element("W1-M1", {"expanded": False}, role="menu"),
++    ]
++    after = [
++        _element("W1-B1", {"enabled": False}),
++        _element("W1-T1", {"focused": False}, role="text", actions=["focus", "type"]),
++        _element("W1-L1", {"visited": False}, role="link"),
++    ]
++
++    assert snapshot_diff(before, after) == {
++        "changed": {
++            "W1-B1": {
++                "changed": {"enabled": {"old": True, "new": False}},
++                "added": {},
++                "removed": {},
++            }
++        },
++        "added": ["W1-L1"],
++        "removed": ["W1-M1"],
++        "unchanged": ["W1-T1"],
++    }
++
++
++def test_snapshot_diff_accepts_semantic_envelopes():
++    before = {"snapshot": {"elements": [_element("W1-B1", {"enabled": True}).__dict__]}}
++    after = {"snapshot": {"elements": [_element("W1-B1", {"enabled": False}).__dict__]}}
++
++    diff = snapshot_diff(before, after)
++
++    assert diff["changed"]["W1-B1"]["changed"] == {"enabled": {"old": True, "new": False}}
++
++
++def test_wait_for_state_change_returns_element_when_expected_state_appears():
++    snapshots = iter(
++        [
++            {"snapshot": {"elements": [_element("W1-B1", {"enabled": True}).__dict__]}},
++            {"snapshot": {"elements": [_element("W1-B1", {"enabled": False}).__dict__]}},
++        ]
++    )
++
++    element = wait_for_state_change(
++        "W1-B1",
++        {"enabled": False},
++        timeout=1.0,
++        poll_interval=0,
++        snapshot_builder=lambda: next(snapshots),
++    )
++
++    assert element.element_id == "W1-B1"
++    assert element.state["enabled"] is False
++
++
++def test_wait_for_state_change_times_out_when_expected_state_never_appears():
++    snapshot = {"snapshot": {"elements": [_element("W1-B1", {"enabled": True}).__dict__]}}
++
++    with pytest.raises(TimeoutError, match="W1-B1.*enabled=False"):
++        wait_for_state_change(
++            "W1-B1",
++            {"enabled": False},
++            timeout=0,
++            poll_interval=0,
++            snapshot_builder=lambda: snapshot,
++        )
