@@ -231,6 +231,31 @@ def display_list():
         click.echo(f"{item.name}: {item.width}x{item.height}+{item.x}+{item.y}{suffix}")
 
 
+@cli.group(name="file")
+def file_cmd():
+    """Desktop filesystem navigation."""
+
+
+@file_cmd.command(name="open")
+@click.argument("path", type=click.Path(path_type=Path))
+def file_open(path):
+    """Open PATH with the desktop's default handler."""
+    from .filesystem import get_filesystem_provider
+
+    get_filesystem_provider().open_path(path)
+    click.echo(f"Opened: {path}")
+
+
+@file_cmd.command(name="select")
+@click.argument("path", type=click.Path(path_type=Path))
+def file_select(path):
+    """Reveal PATH in the desktop file manager."""
+    from .filesystem import get_filesystem_provider
+
+    get_filesystem_provider().select_path(path)
+    click.echo(f"Selected: {path}")
+
+
 @cli.command(name="notify")
 @click.argument("title")
 @click.option("--body", default="", help="Notification body text")
