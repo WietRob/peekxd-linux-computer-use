@@ -27,6 +27,8 @@ class TestToolDefinitions:
         names = {t["name"] for t in get_hermes_tool_definitions()}
         expected = {
             "peekxd_see_semantic",
+            "peekxd_click_element",
+            "peekxd_type_into_element",
             "peekxd_click",
             "peekxd_type",
             "peekxd_key",
@@ -69,6 +71,56 @@ class TestActionExecution:
             result = _result("peekxd_type", {"text": "hello"})
 
         assert result["success"] is True
+        mock_input.type_text.assert_called_once_with("hello")
+
+    def test_click_element_looks_up_semantic_bbox_and_clicks_center(self):
+        from peekxd.inspection.base import UIElement
+
+        mock_input = MagicMock()
+        mock_inspection = MagicMock()
+        mock_inspection.get_ui_tree.return_value = [
+            UIElement(
+                id="raw-ok",
+                name="OK",
+                role="button",
+                position=(20, 10),
+                size=(50, 30),
+                attributes={"actions": ["click"]},
+            )
+        ]
+        mock_window = MagicMock()
+        mock_window.list_windows.return_value = []
+
+        with (
+            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
+            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
+            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
+        ):
+            result = _result("peekxd_click_element", {"element_id": "W1-B1", "button": "left"})
+
+        assert result == {"success": True, "action": "click_element", "element_id": "W1-B1", "x": 45, "y": 25}
+        mock_input.click.assert_called_once_with(45, 25, "left")
+
+    def test_type_into_element_clicks_semantic_center_then_types_text(self):
+        from peekxd.inspection.base import UIElement
+
+        mock_input = MagicMock()
+        mock_inspection = MagicMock()
+        mock_inspection.get_ui_tree.return_value = [
+            UIElement(id="raw-entry", name="Search", role="text", position=(10, 20), size=(0, 0))
+        ]
+        mock_window = MagicMock()
+        mock_window.list_windows.return_value = []
+
+        with (
+            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
+            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
+            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
+        ):
+            result = _result("peekxd_type_into_element", {"element_id": "W1-T1", "text": "hello"})
+
+        assert result == {"success": True, "action": "type_into_element", "element_id": "W1-T1", "text_length": 5, "x": 10, "y": 20}
+        mock_input.click.assert_called_once_with(10, 20, "left")
         mock_input.type_text.assert_called_once_with("hello")
 
     def test_list_windows(self):
