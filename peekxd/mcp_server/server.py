@@ -91,6 +91,12 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         return {"success": True, "text": text}
 
     @mcp.tool()
+    def scroll(direction: str = "down", amount: int = 3) -> Dict[str, Any]:
+        """Scroll the mouse wheel."""
+        _get_input().scroll(direction, amount)
+        return {"success": True, "direction": direction, "amount": amount}
+
+    @mcp.tool()
     def press_key(key: str) -> Dict[str, Any]:
         """Press a key."""
         _get_input().key_press(key)

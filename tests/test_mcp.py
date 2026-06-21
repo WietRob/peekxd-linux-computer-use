@@ -56,6 +56,7 @@ class TestMCPServer:
             "move_mouse",
             "click",
             "type_text",
+            "scroll",
             "press_key",
             "list_windows",
             "focus_window",
@@ -128,6 +129,18 @@ class TestMCPServer:
         assert result["success"] is True
         assert result["text"] == "hello"
         mock_provider.type_text.assert_called_once_with("hello")
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_scroll(self, mock_get_input, config):
+        """scroll tool delegates direction and amount to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        scroll_func = [f for f in registered if f.__name__ == "scroll"][0]
+        result = scroll_func(direction="up", amount=5)
+        assert result == {"success": True, "direction": "up", "amount": 5}
+        mock_provider.scroll.assert_called_once_with("up", 5)
 
     @patch("peekxd.mcp_server.server._get_input")
     def test_press_key(self, mock_get_input, config):
