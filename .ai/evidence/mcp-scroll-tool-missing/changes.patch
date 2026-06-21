@@ -1,0 +1,48 @@
+diff --git a/peekxd/mcp_server/server.py b/peekxd/mcp_server/server.py
+index 8a02138..4422ad6 100644
+--- a/peekxd/mcp_server/server.py
++++ b/peekxd/mcp_server/server.py
+@@ -90,6 +90,12 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
+         _get_input().type_text(text)
+         return {"success": True, "text": text}
+ 
++    @mcp.tool()
++    def scroll(direction: str = "down", amount: int = 3) -> Dict[str, Any]:
++        """Scroll the mouse wheel."""
++        _get_input().scroll(direction, amount)
++        return {"success": True, "direction": direction, "amount": amount}
++
+     @mcp.tool()
+     def press_key(key: str) -> Dict[str, Any]:
+         """Press a key."""
+diff --git a/tests/test_mcp.py b/tests/test_mcp.py
+index 45e333b..2234a30 100644
+--- a/tests/test_mcp.py
++++ b/tests/test_mcp.py
+@@ -56,6 +56,7 @@ class TestMCPServer:
+             "move_mouse",
+             "click",
+             "type_text",
++            "scroll",
+             "press_key",
+             "list_windows",
+             "focus_window",
+@@ -129,6 +130,18 @@ class TestMCPServer:
+         assert result["text"] == "hello"
+         mock_provider.type_text.assert_called_once_with("hello")
+ 
++    @patch("peekxd.mcp_server.server._get_input")
++    def test_scroll(self, mock_get_input, config):
++        """scroll tool delegates direction and amount to input provider."""
++        mock_provider = MagicMock()
++        mock_get_input.return_value = mock_provider
++
++        registered, _ = self._collect_tools(config)
++        scroll_func = [f for f in registered if f.__name__ == "scroll"][0]
++        result = scroll_func(direction="up", amount=5)
++        assert result == {"success": True, "direction": "up", "amount": 5}
++        mock_provider.scroll.assert_called_once_with("up", 5)
++
+     @patch("peekxd.mcp_server.server._get_input")
+     def test_press_key(self, mock_get_input, config):
+         """press_key tool delegates to input provider."""
