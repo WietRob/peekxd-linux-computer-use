@@ -51,6 +51,37 @@ HERMES_TOOLS = [
         },
     },
     {
+        "name": "peekxd_click_element",
+        "description": "Click a semantic element by id using the center of its current bounding box.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "element_id": {"type": "string"},
+                "app_name": {"type": "string"},
+                "window_id": {"type": "string"},
+                "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
+                "scale": {"type": "number", "default": 1.0},
+            },
+            "required": ["element_id"],
+        },
+    },
+    {
+        "name": "peekxd_type_into_element",
+        "description": "Focus a semantic element by id, then type text into it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "element_id": {"type": "string"},
+                "text": {"type": "string"},
+                "app_name": {"type": "string"},
+                "window_id": {"type": "string"},
+                "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
+                "scale": {"type": "number", "default": 1.0},
+            },
+            "required": ["element_id", "text"],
+        },
+    },
+    {
         "name": "peekxd_type",
         "description": "Type text at the current cursor position.",
         "parameters": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
@@ -111,6 +142,32 @@ def execute_hermes_action(action_name: str, params: Dict[str, Any]) -> str:
         elif action_name == "peekxd_click":
             _get_input().click(params["x"], params["y"], params.get("button", "left"))
             result = {"success": True, "action": "click", "x": params["x"], "y": params["y"]}
+        elif action_name in {"peekxd_click_element", "peekxd_type_into_element"}:
+            from ..semantic import build_semantic_snapshot, find_semantic_element
+
+            envelope = build_semantic_snapshot(
+                app=params.get("app_name"),
+                window_id=params.get("window_id"),
+                inspection_provider=_get_inspection(),
+                window_provider=_get_window(),
+            )
+            element = find_semantic_element(envelope, params["element_id"])
+            input_provider = _get_input()
+            scale = float(params.get("scale", 1.0))
+            button = params.get("button", "left")
+            if action_name == "peekxd_click_element":
+                x, y = element.click_center(input_provider, button=button, scale=scale)
+                result = {"success": True, "action": "click_element", "element_id": element.element_id, "x": x, "y": y}
+            else:
+                x, y = element.type_into(input_provider, params["text"], button=button, scale=scale)
+                result = {
+                    "success": True,
+                    "action": "type_into_element",
+                    "element_id": element.element_id,
+                    "text_length": len(params["text"]),
+                    "x": x,
+                    "y": y,
+                }
         elif action_name == "peekxd_type":
             _get_input().type_text(params["text"])
             result = {"success": True, "action": "type", "text_length": len(params["text"])}

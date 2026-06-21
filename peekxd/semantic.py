@@ -22,6 +22,19 @@ class Geometry:
     width: int
     height: int
 
+    def center(self, *, scale: float = 1.0) -> Tuple[int, int]:
+        """Return the scaled center point for this rectangle.
+
+        Zero-width or zero-height accessibility bounds intentionally map to the
+        element origin. Some providers report caret/text nodes this way, and the
+        origin remains the only actionable coordinate available.
+        """
+        if scale <= 0:
+            raise ValueError("scale must be greater than zero")
+        center_x = self.x if self.width <= 0 else self.x + (self.width / 2)
+        center_y = self.y if self.height <= 0 else self.y + (self.height / 2)
+        return int(round(center_x * scale)), int(round(center_y * scale))
+
 
 @dataclass(frozen=True)
 class SemanticWindow:
@@ -46,6 +59,53 @@ class SemanticElement:
     actions: List[str]
     path: str
     confidence: float
+
+    def click_center(self, input_provider: Any, *, button: str = "left", scale: float = 1.0) -> Tuple[int, int]:
+        """Click this element's bounding-box center and return the coordinates used."""
+        x, y = self.bbox.center(scale=scale)
+        input_provider.click(x, y, button)
+        return x, y
+
+    def type_into(self, input_provider: Any, text: str, *, button: str = "left", scale: float = 1.0) -> Tuple[int, int]:
+        """Focus this element by center-clicking it, then type text into it."""
+        x, y = self.click_center(input_provider, button=button, scale=scale)
+        input_provider.type_text(text)
+        return x, y
+
+
+def _geometry_from_mapping(raw: Dict[str, Any]) -> Geometry:
+    return Geometry(
+        x=int(raw.get("x", 0) or 0),
+        y=int(raw.get("y", 0) or 0),
+        width=int(raw.get("width", 0) or 0),
+        height=int(raw.get("height", 0) or 0),
+    )
+
+
+def semantic_element_from_mapping(raw: Dict[str, Any]) -> SemanticElement:
+    """Rehydrate a ``SemanticElement`` from a snapshot element dictionary."""
+    bbox = raw.get("bbox", {}) or {}
+    return SemanticElement(
+        element_id=str(raw.get("element_id") or ""),
+        raw_element_id=str(raw.get("raw_element_id") or ""),
+        window_id=str(raw.get("window_id") or ""),
+        role=str(raw.get("role") or ""),
+        name=str(raw.get("name") or ""),
+        label=str(raw.get("label") or ""),
+        bbox=_geometry_from_mapping(bbox),
+        state=dict(raw.get("state") or {}),
+        actions=[str(action) for action in (raw.get("actions") or [])],
+        path=str(raw.get("path") or ""),
+        confidence=float(raw.get("confidence", 0.0) or 0.0),
+    )
+
+
+def find_semantic_element(envelope: Dict[str, Any], element_id: str) -> SemanticElement:
+    """Find and rehydrate a semantic element by stable id from an envelope."""
+    for raw in envelope.get("snapshot", {}).get("elements", []) or []:
+        if raw.get("element_id") == element_id:
+            return semantic_element_from_mapping(raw)
+    raise ValueError(f"semantic element not found: {element_id}")
 
 
 def _snapshot_id(now: Optional[datetime] = None) -> str:
