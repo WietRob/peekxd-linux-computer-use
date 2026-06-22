@@ -1,32 +1,29 @@
-# Test Plan and Results: peekxd yellow build
+# Test Plan and Results: peekxd config-hermes-default
 
-Branch: autonomy/peekxd/yellow-20260622
-Timestamp: 2026-06-22T18:17:25+02:00
+Branch: autonomy/peekxd/config-hermes-default-20260622
+Commit: 25f6a4a
+Timestamp: 2026-06-22T22:20:22+02:00
 
 ## RED phase
 
-1. Added regression coverage in `tests/test_selftest.py` for:
-   - `selftest.sh --module unit` must run the unit module rather than silently running zero checks.
-   - `selftest.sh --module definitely-not-a-module` must fail with exit code 2 and an "Unknown module" error.
-   - `selftest.sh` must be executable for the documented `./selftest.sh` usage.
-2. Verified failures before implementation:
-   - `python3 -m pytest tests/test_selftest.py -q`
-   - Result: 2 failed, 1 passed. The failures showed `--module unit` produced zero checks and unknown module exited 0.
-   - `python3 -m pytest tests/test_selftest.py::test_selftest_script_is_executable_for_documented_usage -q`
-   - Result: 1 failed because `selftest.sh` had mode `100644`.
+1. Added/updated config tests to validate Hermes as default vision provider and provider-order preference:
+   - `tests/test_config.py::TestConfigManager::test_default_vision_config`
+   - `tests/test_config.py::TestConfigManager::test_load_existing_config`
+   - `tests/test_config.py::TestConfigManager::test_get_dot_notation`
 
-## GREEN / verification phase
+2. Ran focused test file before finishing implementation and after changes (post-fix):
+   - `python3 -m pytest tests/test_config.py -q`
+   - Result: 11 passed in 0.02s.
 
-Commands run after implementation:
+## GREEN phase / verification
 
-1. `python3 -m pytest tests/test_selftest.py -q`
-   - Result: 4 passed in 4.81s.
-2. `./selftest.sh --module unit`
-   - Result: Acceptance suite PASSED; Unit tests (490 tests).
-3. `python3 -m pytest tests/ -q`
-   - Result: 494 passed in 6.88s.
+1. Full-suite verification after implementation:
+   - `python3 -m pytest tests/ -q`
+   - Result: 495 passed in 7.05s.
 
-## Notes
+2. Sanity check of output for shell noise only:
+   - Full suite emitted non-fatal bash process-group warning in this environment (does not affect test assertions).
 
-- Initial attempt to run `python -m pytest tests/ -q` failed because `python` is not installed in this environment; reran with `python3` successfully.
-- `git fetch --all --prune` failed due local GitHub SSH auth/display environment, so the build proceeded from the existing local `main` state as checked out in the repository.
+## Test files changed
+
+- `tests/test_config.py`

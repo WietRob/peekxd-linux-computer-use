@@ -20,6 +20,14 @@ class TestConfigManager:
             cm = ConfigManager(str(config_path))
             assert cm._config == DEFAULT_CONFIG
 
+    def test_default_vision_config(self):
+        """Default vision provider configuration prefers Hermes first."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            cm = ConfigManager(str(config_path))
+            assert cm.get("vision.default_provider") == "hermes"
+            assert cm.get("vision.providers") == ["hermes", "openai", "anthropic", "ollama"]
+
     def test_load_existing_config(self):
         """ConfigManager loads existing config and merges with defaults."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -33,7 +41,7 @@ class TestConfigManager:
             assert cm.get("screenshot.quality") == 80
             # Default keys are preserved through merge
             assert "vision" in cm._config
-            assert cm.get("vision.default_provider") == "openai"
+            assert cm.get("vision.default_provider") == "hermes"
 
     def test_save_and_reload(self):
         """Config can be saved and reloaded."""
@@ -51,7 +59,7 @@ class TestConfigManager:
         cm = ConfigManager.__new__(ConfigManager)
         cm._config = DEFAULT_CONFIG.copy()
         assert cm.get("screenshot.format") == "png"
-        assert cm.get("vision.default_provider") == "openai"
+        assert cm.get("vision.default_provider") == "hermes"
         assert cm.get("vision.ollama_host") == "http://localhost:11434"
 
     def test_get_missing_key_returns_default(self):

@@ -1,139 +1,64 @@
-diff --git a/selftest.sh b/selftest.sh
-old mode 100644
-new mode 100755
-index 7052a5a..573c134
---- a/selftest.sh
-+++ b/selftest.sh
-@@ -6,7 +6,72 @@ set -euo pipefail
+diff --git a/README.md b/README.md
+index 34fc6f0..e5bb2fa 100644
+--- a/README.md
++++ b/README.md
+@@ -193,6 +193,7 @@ peekxd config get vision.default_provider
+ ```
  
- SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
- VERBOSE="${VERBOSE:-0}"
--MODULE_FILTER="${1:-all}"
-+MODULE_FILTER="all"
-+VALID_MODULES=(all unit desktop screenshot input inspection window vision cli config mcp)
-+
-+usage() {
-+    cat <<EOF
-+Usage: ./selftest.sh [--verbose] [--module MODULE]
-+       ./selftest.sh [MODULE]
-+
-+Modules: ${VALID_MODULES[*]}
-+EOF
-+}
-+
-+is_valid_module() {
-+    local candidate="$1"
-+    local module
-+    for module in "${VALID_MODULES[@]}"; do
-+        if [[ "$candidate" == "$module" ]]; then
-+            return 0
-+        fi
-+    done
-+    return 1
-+}
-+
-+parse_args() {
-+    while [[ $# -gt 0 ]]; do
-+        case "$1" in
-+            --module|-m)
-+                if [[ $# -lt 2 || "$2" == --* ]]; then
-+                    echo "Missing module name after $1" >&2
-+                    usage >&2
-+                    exit 2
-+                fi
-+                MODULE_FILTER="$2"
-+                shift 2
-+                ;;
-+            --verbose|-v)
-+                VERBOSE=1
-+                shift
-+                ;;
-+            --help|-h)
-+                usage
-+                exit 0
-+                ;;
-+            --*)
-+                echo "Unknown option: $1" >&2
-+                usage >&2
-+                exit 2
-+                ;;
-+            *)
-+                if [[ "$MODULE_FILTER" != "all" ]]; then
-+                    echo "Unexpected argument: $1" >&2
-+                    usage >&2
-+                    exit 2
-+                fi
-+                MODULE_FILTER="$1"
-+                shift
-+                ;;
-+        esac
-+    done
-+
-+    if ! is_valid_module "$MODULE_FILTER"; then
-+        echo "Unknown module: $MODULE_FILTER" >&2
-+        usage >&2
-+        exit 2
-+    fi
-+}
+ Config location: `~/.config/peekxd/config.json`
++`vision.default_provider` defaults to `hermes` for no-API-key setups.
  
- PASSED=0
- FAILED=0
-@@ -291,4 +356,5 @@ main() {
-     fi
- }
+ ### Vision Providers
  
-+parse_args "$@"
- main
-diff --git a/tests/test_selftest.py b/tests/test_selftest.py
-index 3285e3e..33d9f0d 100644
---- a/tests/test_selftest.py
-+++ b/tests/test_selftest.py
-@@ -4,12 +4,12 @@ import subprocess
- from pathlib import Path
+diff --git a/peekxd/config/manager.py b/peekxd/config/manager.py
+index 2eb501d..852d6c4 100644
+--- a/peekxd/config/manager.py
++++ b/peekxd/config/manager.py
+@@ -14,8 +14,8 @@ DEFAULT_CONFIG = {
+         "quality": 95
+     },
+     "vision": {
+-        "providers": ["openai", "anthropic", "ollama"],
+-        "default_provider": "openai",
++        "providers": ["hermes", "openai", "anthropic", "ollama"],
++        "default_provider": "hermes",
+         "openai_model": "gpt-4o",
+         "anthropic_model": "claude-3-opus-20240229",
+         "ollama_model": "llava:latest",
+diff --git a/tests/test_config.py b/tests/test_config.py
+index bf5eb4e..ec18a7e 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -20,6 +20,14 @@ class TestConfigManager:
+             cm = ConfigManager(str(config_path))
+             assert cm._config == DEFAULT_CONFIG
  
++    def test_default_vision_config(self):
++        """Default vision provider configuration prefers Hermes first."""
++        with tempfile.TemporaryDirectory() as tmpdir:
++            config_path = Path(tmpdir) / "config.json"
++            cm = ConfigManager(str(config_path))
++            assert cm.get("vision.default_provider") == "hermes"
++            assert cm.get("vision.providers") == ["hermes", "openai", "anthropic", "ollama"]
++
+     def test_load_existing_config(self):
+         """ConfigManager loads existing config and merges with defaults."""
+         with tempfile.TemporaryDirectory() as tmpdir:
+@@ -33,7 +41,7 @@ class TestConfigManager:
+             assert cm.get("screenshot.quality") == 80
+             # Default keys are preserved through merge
+             assert "vision" in cm._config
+-            assert cm.get("vision.default_provider") == "openai"
++            assert cm.get("vision.default_provider") == "hermes"
  
--def test_selftest_unit_exit_code_zero() -> None:
-+def run_selftest(*args: str) -> subprocess.CompletedProcess[str]:
-     repo_root = Path(__file__).resolve().parents[1]
-     script = repo_root / "selftest.sh"
+     def test_save_and_reload(self):
+         """Config can be saved and reloaded."""
+@@ -51,7 +59,7 @@ class TestConfigManager:
+         cm = ConfigManager.__new__(ConfigManager)
+         cm._config = DEFAULT_CONFIG.copy()
+         assert cm.get("screenshot.format") == "png"
+-        assert cm.get("vision.default_provider") == "openai"
++        assert cm.get("vision.default_provider") == "hermes"
+         assert cm.get("vision.ollama_host") == "http://localhost:11434"
  
--    result = subprocess.run(
--        ["bash", str(script), "unit"],
-+    return subprocess.run(
-+        ["bash", str(script), *args],
-         cwd=str(repo_root),
-         check=False,
-         text=True,
-@@ -18,5 +18,30 @@ def test_selftest_unit_exit_code_zero() -> None:
-         timeout=180,
-     )
- 
-+
-+def test_selftest_unit_exit_code_zero() -> None:
-+    result = run_selftest("unit")
-+
-+    assert result.returncode == 0
-+    assert "Unit tests (" in result.stdout
-+
-+
-+def test_selftest_module_option_runs_named_module() -> None:
-+    result = run_selftest("--module", "unit")
-+
-     assert result.returncode == 0
--    assert "Unit tests (" in result.stdout
-\ No newline at end of file
-+    assert "Unit tests (" in result.stdout
-+
-+
-+def test_selftest_rejects_unknown_module() -> None:
-+    result = run_selftest("--module", "definitely-not-a-module")
-+
-+    assert result.returncode == 2
-+    assert "Unknown module" in result.stderr
-+
-+
-+def test_selftest_script_is_executable_for_documented_usage() -> None:
-+    repo_root = Path(__file__).resolve().parents[1]
-+    script = repo_root / "selftest.sh"
-+
-+    assert script.stat().st_mode & 0o111
+     def test_get_missing_key_returns_default(self):
