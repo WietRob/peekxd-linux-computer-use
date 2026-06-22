@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 
 pass() {
     echo -e "${GREEN}PASS${NC}: $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail() {
@@ -28,12 +28,12 @@ fail() {
     if [[ $# -gt 1 ]]; then
         echo "      $2"
     fi
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 warn() {
     echo -e "${YELLOW}WARN${NC}: $1"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 }
 
 header() {
@@ -46,7 +46,7 @@ test_python_unit() {
     header "Python Unit Tests"
     cd "$SCRIPT_DIR"
 
-    if ! python3 -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/peekxd_test.log; then
+    if ! python3 -m pytest tests/ -v --tb=short --ignore tests/test_selftest.py 2>&1 | tee /tmp/peekxd_test.log; then
         fail "Unit tests" "See /tmp/peekxd_test.log"
     else
         local count

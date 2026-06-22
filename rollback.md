@@ -1,26 +1,36 @@
-# Rollback: filesystem-path-provider
+# Rollback: peekxd green-build selftest fix
 
-Branch: autonomy/peekxd/filesystem-path-provider-20260621
+Branch: autonomy/peekxd/green-202606221326
 
-## Safe rollback options
+## Pre-merge safety rollback
 
-1. Before merge: close the PR and delete the branch/worktree.
+1) Do not merge yet: close this PR or keep the branch for review.
+2) Delete the local branch:
    ```bash
-   git worktree remove /home/wietrob/projects/.worktrees/peekxd-filesystem-path-provider-20260621
-   git branch -D autonomy/peekxd/filesystem-path-provider-20260621
-   git push origin --delete autonomy/peekxd/filesystem-path-provider-20260621
+   git checkout main
+   git branch -D autonomy/peekxd/green-202606221326
    ```
 
-2. After merge: revert the merge/squash commit with human approval per No-Revert policy.
+3) Delete the remote branch:
    ```bash
-   git revert <merged_commit_sha>
+   git push origin --delete autonomy/peekxd/green-202606221326
+   ```
+
+## Post-merge rollback (if merged)
+
+1) Revert the merge commit with explicit approval (No-Revert policy requires review before any revert command):
+   ```bash
+   git revert <merge_or_squash_commit_sha>
+   ```
+2) Validate state:
+   ```bash
    python3 -m pytest tests/ -q
    ```
-
-3. Manual patch rollback: remove `peekxd/filesystem.py` and `tests/test_filesystem.py`, then delete the `file` command group block from `peekxd/cli.py`.
-
-## Verification after rollback
+   
+## Verification
 
 ```bash
+bash ./selftest.sh unit
+bash ./selftest.sh desktop
 python3 -m pytest tests/ -q
 ```
