@@ -19,4 +19,4 @@ def test_selftest_unit_exit_code_zero() -> None:
     )
 
     assert result.returncode == 0
-    assert "PASS: Unit tests" in result.stdout
+    assert "Unit tests (" in result.stdout

@@ -1,25 +1,36 @@
-# Rollback: selftest green diagnostics
+# Rollback: peekxd green-build selftest fix
 
 Branch: autonomy/peekxd/green-202606221326
 
-## Safe rollback options
+## Pre-merge safety rollback
 
-1. Before merge: close the PR and delete branch `autonomy/peekxd/green-202606221326`.
-2. Undo the changes directly:
+1) Do not merge yet: close this PR or keep the branch for review.
+2) Delete the local branch:
    ```bash
    git checkout main
-   git checkout -- selftest.sh tests/test_selftest.py rollback.md
+   git branch -D autonomy/peekxd/green-202606221326
    ```
 
-3. Delete the branch locally and remotely if desired:
+3) Delete the remote branch:
    ```bash
-   git branch -D autonomy/peekxd/green-202606221326
    git push origin --delete autonomy/peekxd/green-202606221326
    ```
 
-## Verification after rollback
+## Post-merge rollback (if merged)
+
+1) Revert the merge commit with explicit approval (No-Revert policy requires review before any revert command):
+   ```bash
+   git revert <merge_or_squash_commit_sha>
+   ```
+2) Validate state:
+   ```bash
+   python3 -m pytest tests/ -q
+   ```
+   
+## Verification
 
 ```bash
-python3 -m pytest tests/ -q
 bash ./selftest.sh unit
+bash ./selftest.sh desktop
+python3 -m pytest tests/ -q
 ```
