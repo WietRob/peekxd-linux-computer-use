@@ -1,0 +1,106 @@
+diff --git a/peekxd/agent/orchestrator.py b/peekxd/agent/orchestrator.py
+index a62195a..5a1153b 100644
+--- a/peekxd/agent/orchestrator.py
++++ b/peekxd/agent/orchestrator.py
+@@ -452,9 +452,8 @@ If the task is complete, use action "done"."""
+         # GHOST zone: preview, optionally execute after approval (V4)
+         if zone_decision.zone.value == "ghost":
+             from ..core.zones import ZoneDecision
+-            screenshot_path = screen_state.get("path") if screen_state else None
+             preview = ZoneDecision.create_ghost_preview(
+-                action, params, zone_decision, screenshot_path=screenshot_path
++                action, params, zone_decision
+             )
+             preview_dict = preview.to_dict()
+ 
+@@ -467,7 +466,6 @@ If the task is complete, use action "done"."""
+                     action=action,
+                     params=params,
+                     preview=preview_dict,
+-                    screenshot_path=screenshot_path,
+                     markup_path=preview.markup_path,
+                     timeout_seconds=self.ghost_overlay_timeout,
+                 )
+@@ -577,9 +575,8 @@ If the task is complete, use action "done"."""
+                 from ..core.zones import ZoneDecision as _ZD
+                 from ..core.overlay import OverlayRequest
+ 
+-                screenshot_path = screen_state.get("path") if screen_state else None
+                 preview = _ZD.create_ghost_preview(
+-                    action, params, zone_decision, screenshot_path=screenshot_path,
++                    action, params, zone_decision,
+                 )
+                 preview_dict = preview.to_dict()
+ 
+@@ -588,7 +585,6 @@ If the task is complete, use action "done"."""
+                     action=action,
+                     params=params,
+                     preview=preview_dict,
+-                    screenshot_path=screenshot_path,
+                     markup_path=preview.markup_path,
+                     timeout_seconds=self.ghost_overlay_timeout,
+                 )
+diff --git a/tests/test_orchestrator_overlay.py b/tests/test_orchestrator_overlay.py
+index ac6859a..01bb67e 100644
+--- a/tests/test_orchestrator_overlay.py
++++ b/tests/test_orchestrator_overlay.py
+@@ -173,6 +173,29 @@ class TestGhostWithOverlay:
+         assert result["ghost"] is True
+         assert "overlay_decision" in result
+ 
++    def test_force_ghost_overlay_ignores_stale_screenshot_path(self):
++        """Semantic-only _see() makes screenshot paths unavailable to overlays."""
++        orch = _make_orchestrator(
++            force_ghost=True,
++            enable_ghost_overlay=True,
++            screenshot_provider=None,
++        )
++        mock_ctrl = MagicMock()
++        mock_ctrl.show_preview.return_value = OverlayDecision(
++            timed_out=True, backend="noop", reason="Timeout"
++        )
++        orch._overlay_controller = mock_ctrl
++
++        result = orch._act(
++            {"action": "click", "params": {"x": 10, "y": 20}, "reason": "test"},
++            {"path": "/tmp/stale-screen.png", "description": "semantic screen"},
++        )
++
++        assert result["ghost"] is True
++        mock_ctrl.show_preview.assert_called_once()
++        request = mock_ctrl.show_preview.call_args.args[0]
++        assert request.screenshot_path is None
++
+ 
+ class TestShadowUnchanged:
+     """SHADOW zone must not trigger overlay."""
+diff --git a/tests/test_real_confirmable_ghost.py b/tests/test_real_confirmable_ghost.py
+index eec242e..bccb629 100644
+--- a/tests/test_real_confirmable_ghost.py
++++ b/tests/test_real_confirmable_ghost.py
+@@ -174,6 +174,25 @@ class TestRealConfirmableGhostTimedOut:
+         assert result["executed"] is False
+         assert result["blocked"] is True
+ 
++    def test_click_overlay_ignores_stale_screenshot_path(self):
++        """Confirmable-ghost routing stays semantic-only when screenshot is absent."""
++        orch = _make_real_orch(
++            OverlayDecision(timed_out=True, backend="noop", reason="Timeout"),
++        )
++        orch._screenshot_prov = None
++        plan = {"action": "click", "params": {"x": 100, "y": 200}, "reason": "test"}
++        result = orch._act(
++            plan,
++            {"path": "/tmp/stale-shadow-screen.png", "description": "semantic screen"},
++        )
++
++        assert result["executed"] is False
++        mock_ctrl = orch._overlay_controller
++        assert isinstance(mock_ctrl, MagicMock)
++        mock_ctrl.show_preview.assert_called_once()
++        request = mock_ctrl.show_preview.call_args.args[0]
++        assert request.screenshot_path is None
++
+ 
+ # ===========================================================================
+ # Test 6: Real destructive type + approved=True → no execution

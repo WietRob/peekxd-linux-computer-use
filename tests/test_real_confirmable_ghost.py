@@ -174,6 +174,25 @@ class TestRealConfirmableGhostTimedOut:
         assert result["executed"] is False
         assert result["blocked"] is True
 
+    def test_click_overlay_ignores_stale_screenshot_path(self):
+        """Confirmable-ghost routing stays semantic-only when screenshot is absent."""
+        orch = _make_real_orch(
+            OverlayDecision(timed_out=True, backend="noop", reason="Timeout"),
+        )
+        orch._screenshot_prov = None
+        plan = {"action": "click", "params": {"x": 100, "y": 200}, "reason": "test"}
+        result = orch._act(
+            plan,
+            {"path": "/tmp/stale-shadow-screen.png", "description": "semantic screen"},
+        )
+
+        assert result["executed"] is False
+        mock_ctrl = orch._overlay_controller
+        assert isinstance(mock_ctrl, MagicMock)
+        mock_ctrl.show_preview.assert_called_once()
+        request = mock_ctrl.show_preview.call_args.args[0]
+        assert request.screenshot_path is None
+
 
 # ===========================================================================
 # Test 6: Real destructive type + approved=True → no execution

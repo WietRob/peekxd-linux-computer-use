@@ -452,9 +452,8 @@ If the task is complete, use action "done"."""
         # GHOST zone: preview, optionally execute after approval (V4)
         if zone_decision.zone.value == "ghost":
             from ..core.zones import ZoneDecision
-            screenshot_path = screen_state.get("path") if screen_state else None
             preview = ZoneDecision.create_ghost_preview(
-                action, params, zone_decision, screenshot_path=screenshot_path
+                action, params, zone_decision
             )
             preview_dict = preview.to_dict()
 
@@ -467,7 +466,6 @@ If the task is complete, use action "done"."""
                     action=action,
                     params=params,
                     preview=preview_dict,
-                    screenshot_path=screenshot_path,
                     markup_path=preview.markup_path,
                     timeout_seconds=self.ghost_overlay_timeout,
                 )
@@ -577,9 +575,8 @@ If the task is complete, use action "done"."""
                 from ..core.zones import ZoneDecision as _ZD
                 from ..core.overlay import OverlayRequest
 
-                screenshot_path = screen_state.get("path") if screen_state else None
                 preview = _ZD.create_ghost_preview(
-                    action, params, zone_decision, screenshot_path=screenshot_path,
+                    action, params, zone_decision,
                 )
                 preview_dict = preview.to_dict()
 
@@ -588,7 +585,6 @@ If the task is complete, use action "done"."""
                     action=action,
                     params=params,
                     preview=preview_dict,
-                    screenshot_path=screenshot_path,
                     markup_path=preview.markup_path,
                     timeout_seconds=self.ghost_overlay_timeout,
                 )
