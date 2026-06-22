@@ -1,16 +1,32 @@
-# Test Plan and Results
+# Test Plan and Results: peekxd yellow build
 
-- Command: `python3 -m pytest tests/test_selftest.py -q`
-  - Result: `1 passed in 2.33s`
+Branch: autonomy/peekxd/yellow-20260622
+Timestamp: 2026-06-22T18:17:25+02:00
 
-- Command: `bash ./selftest.sh unit`
-  - Result: Exit code 0, 490 tests + selftest integration check, acceptance suite passed.
+## RED phase
 
-- Command: `bash ./selftest.sh desktop`
-  - Result: Exit code 0, acceptance suite passed.
+1. Added regression coverage in `tests/test_selftest.py` for:
+   - `selftest.sh --module unit` must run the unit module rather than silently running zero checks.
+   - `selftest.sh --module definitely-not-a-module` must fail with exit code 2 and an "Unknown module" error.
+   - `selftest.sh` must be executable for the documented `./selftest.sh` usage.
+2. Verified failures before implementation:
+   - `python3 -m pytest tests/test_selftest.py -q`
+   - Result: 2 failed, 1 passed. The failures showed `--module unit` produced zero checks and unknown module exited 0.
+   - `python3 -m pytest tests/test_selftest.py::test_selftest_script_is_executable_for_documented_usage -q`
+   - Result: 1 failed because `selftest.sh` had mode `100644`.
 
-- Command: `python3 -m pytest tests/ -q`
-  - Result: `491 passed in 5.27s`
+## GREEN / verification phase
 
-Notes:
-- `python3 -m ruff check .` is still unavailable in this environment (`No module named ruff`), so linting/format checks cannot be run here.
+Commands run after implementation:
+
+1. `python3 -m pytest tests/test_selftest.py -q`
+   - Result: 4 passed in 4.81s.
+2. `./selftest.sh --module unit`
+   - Result: Acceptance suite PASSED; Unit tests (490 tests).
+3. `python3 -m pytest tests/ -q`
+   - Result: 494 passed in 6.88s.
+
+## Notes
+
+- Initial attempt to run `python -m pytest tests/ -q` failed because `python` is not installed in this environment; reran with `python3` successfully.
+- `git fetch --all --prune` failed due local GitHub SSH auth/display environment, so the build proceeded from the existing local `main` state as checked out in the repository.
