@@ -14,8 +14,8 @@ DEFAULT_CONFIG = {
         "quality": 95
     },
     "vision": {
-        "providers": ["openai", "anthropic", "ollama"],
-        "default_provider": "openai",
+        "providers": ["hermes", "openai", "anthropic", "ollama"],
+        "default_provider": "hermes",
         "openai_model": "gpt-4o",
         "anthropic_model": "claude-3-opus-20240229",
         "ollama_model": "llava:latest",

@@ -1,37 +1,35 @@
-# Rollback: peekxd yellow-build selftest argument parsing
+# Rollback: config-hermes-default
 
-Branch: autonomy/peekxd/yellow-20260622
+Branch: autonomy/peekxd/config-hermes-default-20260622
+Commit: 25f6a4a
 
 ## Rollback options
 
 Preferred after commit exists:
 
 ```bash
-git revert <yellow-build-commit-sha>
+git revert <config-hermes-default-commit-sha>
 python3 -m pytest tests/ -q
 ```
 
-If the branch has not been merged and can simply be discarded locally:
+If this feature branch has not been merged and should be abandoned locally:
 
 ```bash
 git checkout main
-git branch -D autonomy/peekxd/yellow-20260622
+git branch -D autonomy/peekxd/config-hermes-default-20260622
 ```
 
-If a remote branch is later pushed by the orchestrator and must be removed before merge:
+If a remote branch is already pushed and must be removed:
 
 ```bash
-git push origin --delete autonomy/peekxd/yellow-20260622
+git push origin --delete autonomy/peekxd/config-hermes-default-20260622
 ```
 
-## Files changed by this build
+## Files to inspect after rollback
 
-- `selftest.sh`
-- `tests/test_selftest.py`
-- `changes.patch`
-- `tests.md`
-- `rollback.md`
-- `evidence.md`
+- `peekxd/config/manager.py`
+- `README.md`
+- `tests/test_config.py`
 
 ## Post-rollback verification
 
@@ -41,8 +39,4 @@ Run:
 python3 -m pytest tests/ -q
 ```
 
-Expected state after rollback: test suite returns to the pre-yellow behavior and the yellow-specific selftest argument parsing coverage is absent.
-
-## No-revert policy note
-
-Do not run `git revert` on product-code commits without the required human approval path if this repository's autonomy no-revert policy is in force. If approval is needed, prepare a revert-request.md instead of reverting directly.
+Expected state: default vision provider in `DEFAULT_CONFIG` reverts to `openai`, and `test_config.py` no longer expects Hermes-first defaults.
