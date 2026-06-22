@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 
 pass() {
     echo -e "${GREEN}PASS${NC}: $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail() {
@@ -28,12 +28,12 @@ fail() {
     if [[ $# -gt 1 ]]; then
         echo "      $2"
     fi
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 warn() {
     echo -e "${YELLOW}WARN${NC}: $1"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 }
 
 header() {
