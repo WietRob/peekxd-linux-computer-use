@@ -1,0 +1,50 @@
+diff --git a/peekxd/semantic.py b/peekxd/semantic.py
+index 1186a00..560f694 100644
+--- a/peekxd/semantic.py
++++ b/peekxd/semantic.py
+@@ -342,6 +342,12 @@ def build_semantic_snapshot(
+     elements_raw = inspection_provider.get_ui_tree(app) or []
+     windows = _build_windows(window_provider, app, window_id)
+     primary_window_id = windows[0].window_id
++    fallback_used = (
++        len(windows) == 1
++        and windows[0].geometry == Geometry(0, 0, 0, 0)
++        and windows[0].title == (app or "semantic-source")
++        and windows[0].app_id == app
++    )
+ 
+     elements: List[SemanticElement] = []
+     for index, element in enumerate(elements_raw[: max(0, int(max_elements))], start=1):
+@@ -373,6 +379,19 @@ def build_semantic_snapshot(
+         )
+ 
+     elapsed_ms = int((time.monotonic() - started) * 1000)
++    missing_apps = [app] if app and not elements else []
++    source_fidelity = "low" if not elements else "medium" if fallback_used else "high"
++    completeness_score = 0.0 if not elements else 0.75 if fallback_used else 1.0
++    source = {
++        "kind": "live_accessibility",
++        "provider": inspection_provider.__class__.__name__,
++        "source_fidelity": source_fidelity,
++        "completeness_score": completeness_score,
++        "missing_apps": missing_apps,
++        "fallback_used": fallback_used,
++    }
++    if not elements:
++        source["warning"] = "live_accessibility_returned_no_elements"
+     return {
+         "schema_version": SCHEMA_VERSION,
+         "command": "see --semantic",
+@@ -391,11 +410,7 @@ def build_semantic_snapshot(
+             "ttl_seconds": int(ttl_seconds),
+             "cache_ttl_remaining_seconds": float(ttl_seconds),
+             "cached": False,
+-            "source": {
+-                "kind": "live_accessibility",
+-                "provider": inspection_provider.__class__.__name__,
+-                "source_fidelity": "medium",
+-            },
++            "source": source,
+             "windows": [asdict(window) for window in windows],
+             "elements": [asdict(element) for element in elements],
+         },
