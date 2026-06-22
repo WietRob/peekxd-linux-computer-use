@@ -1,65 +1,139 @@
-diff --git a/rollback.md b/rollback.md
-index f9f0527..d0fa85c 100644
---- a/rollback.md
-+++ b/rollback.md
-@@ -1,25 +1,36 @@
--# Rollback: selftest green diagnostics
-+# Rollback: peekxd green-build selftest fix
-@@ -5,14 +5,23 @@
--1. Before merge: close the PR and delete branch `autonomy/peekxd/green-202606221326`.
--2. Undo the changes directly:
--   ```bash
--   git checkout main
--   git checkout -- selftest.sh tests/test_selftest.py rollback.md
--   ```
--
--3. Delete the branch locally and remotely if desired:
--   ```bash
--   git branch -D autonomy/peekxd/green-202606221326
--   git push origin --delete autonomy/peekxd/green-202606221326
--   ```
-+1) Do not merge yet: close this PR or keep the branch for review.
-+2) Delete the local branch:
-+   ```bash
-+   git checkout main
-+   git branch -D autonomy/peekxd/green-202606221326
-+   ```
-+
-+3) Delete the remote branch:
-+   ```bash
-+   git push origin --delete autonomy/peekxd/green-202606221326
-+   ```
-+
-+## Post-merge rollback (if merged)
-+
-+1) Revert the merge commit with explicit approval (No-Revert policy requires review before any revert command):
-+   ```bash
-+   git revert <merge_or_squash_commit_sha>
-+   ```
-+2) Validate state:
-+   ```bash
-+   python3 -m pytest tests/ -q
-+   ```
-@@ -16,8 +25,8 @@
--3. Manual patch rollback: remove `peekxd/filesystem.py` and `tests/test_filesystem.py`, then delete the `file` command group block from `peekxd/cli.py`.
-+## Verification
+diff --git a/selftest.sh b/selftest.sh
+old mode 100644
+new mode 100755
+index 7052a5a..573c134
+--- a/selftest.sh
++++ b/selftest.sh
+@@ -6,7 +6,72 @@ set -euo pipefail
  
--## Verification after rollback
--
- ```bash
--python3 -m pytest tests/ -q
-+bash ./selftest.sh unit
-+bash ./selftest.sh desktop
-+python3 -m pytest tests/ -q
- ```
-@@
- diff --git a/selftest.sh b/selftest.sh
-@@
--    if ! python3 -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/peekxd_test.log; then
-+    if ! python3 -m pytest tests/ -v --tb=short --ignore tests/test_selftest.py 2>&1 | tee /tmp/peekxd_test.log; then
-         fail "Unit tests" "See /tmp/peekxd_test.log"
-@@
- diff --git a/tests/test_selftest.py b/tests/test_selftest.py
-@@
--    assert "PASS: Unit tests" in result.stdout
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ VERBOSE="${VERBOSE:-0}"
+-MODULE_FILTER="${1:-all}"
++MODULE_FILTER="all"
++VALID_MODULES=(all unit desktop screenshot input inspection window vision cli config mcp)
++
++usage() {
++    cat <<EOF
++Usage: ./selftest.sh [--verbose] [--module MODULE]
++       ./selftest.sh [MODULE]
++
++Modules: ${VALID_MODULES[*]}
++EOF
++}
++
++is_valid_module() {
++    local candidate="$1"
++    local module
++    for module in "${VALID_MODULES[@]}"; do
++        if [[ "$candidate" == "$module" ]]; then
++            return 0
++        fi
++    done
++    return 1
++}
++
++parse_args() {
++    while [[ $# -gt 0 ]]; do
++        case "$1" in
++            --module|-m)
++                if [[ $# -lt 2 || "$2" == --* ]]; then
++                    echo "Missing module name after $1" >&2
++                    usage >&2
++                    exit 2
++                fi
++                MODULE_FILTER="$2"
++                shift 2
++                ;;
++            --verbose|-v)
++                VERBOSE=1
++                shift
++                ;;
++            --help|-h)
++                usage
++                exit 0
++                ;;
++            --*)
++                echo "Unknown option: $1" >&2
++                usage >&2
++                exit 2
++                ;;
++            *)
++                if [[ "$MODULE_FILTER" != "all" ]]; then
++                    echo "Unexpected argument: $1" >&2
++                    usage >&2
++                    exit 2
++                fi
++                MODULE_FILTER="$1"
++                shift
++                ;;
++        esac
++    done
++
++    if ! is_valid_module "$MODULE_FILTER"; then
++        echo "Unknown module: $MODULE_FILTER" >&2
++        usage >&2
++        exit 2
++    fi
++}
+ 
+ PASSED=0
+ FAILED=0
+@@ -291,4 +356,5 @@ main() {
+     fi
+ }
+ 
++parse_args "$@"
+ main
+diff --git a/tests/test_selftest.py b/tests/test_selftest.py
+index 3285e3e..33d9f0d 100644
+--- a/tests/test_selftest.py
++++ b/tests/test_selftest.py
+@@ -4,12 +4,12 @@ import subprocess
+ from pathlib import Path
+ 
+ 
+-def test_selftest_unit_exit_code_zero() -> None:
++def run_selftest(*args: str) -> subprocess.CompletedProcess[str]:
+     repo_root = Path(__file__).resolve().parents[1]
+     script = repo_root / "selftest.sh"
+ 
+-    result = subprocess.run(
+-        ["bash", str(script), "unit"],
++    return subprocess.run(
++        ["bash", str(script), *args],
+         cwd=str(repo_root),
+         check=False,
+         text=True,
+@@ -18,5 +18,30 @@ def test_selftest_unit_exit_code_zero() -> None:
+         timeout=180,
+     )
+ 
++
++def test_selftest_unit_exit_code_zero() -> None:
++    result = run_selftest("unit")
++
++    assert result.returncode == 0
 +    assert "Unit tests (" in result.stdout
++
++
++def test_selftest_module_option_runs_named_module() -> None:
++    result = run_selftest("--module", "unit")
++
+     assert result.returncode == 0
+-    assert "Unit tests (" in result.stdout
+\ No newline at end of file
++    assert "Unit tests (" in result.stdout
++
++
++def test_selftest_rejects_unknown_module() -> None:
++    result = run_selftest("--module", "definitely-not-a-module")
++
++    assert result.returncode == 2
++    assert "Unknown module" in result.stderr
++
++
++def test_selftest_script_is_executable_for_documented_usage() -> None:
++    repo_root = Path(__file__).resolve().parents[1]
++    script = repo_root / "selftest.sh"
++
++    assert script.stat().st_mode & 0o111
