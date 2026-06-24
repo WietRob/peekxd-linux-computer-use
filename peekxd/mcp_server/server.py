@@ -98,6 +98,12 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         return {"success": True, "x": x, "y": y, "button": button}
 
     @mcp.tool()
+    def drag(x1: int, y1: int, x2: int, y2: int) -> Dict[str, Any]:
+        """Perform a drag-and-drop operation from (x1,y1) to (x2,y2)."""
+        _get_input().drag(x1, y1, x2, y2)
+        return {"success": True, "from": {"x": x1, "y": y1}, "to": {"x": x2, "y": y2}}
+
+    @mcp.tool()
     def type_text(text: str) -> Dict[str, Any]:
         """Type text."""
         _get_input().type_text(text)

@@ -380,12 +380,13 @@ Available actions:
 - key: Press a key or hotkey
 - scroll: Scroll in a direction
 - focus_window: Focus a window by title
+- drag: Drag from one point to another (mousedown-move-mouseup)
 - wait: Wait briefly
 - done: Mark task as complete
 
 Respond with ONLY a JSON object:
 {{
-  "action": "click|type|key|scroll|capture_screen|mark_elements|focus_window|wait|done",
+  "action": "click|type|key|scroll|drag|capture_screen|mark_elements|focus_window|wait|done",
   "params": {{}},
   "reason": "why this action"
 }}
@@ -792,6 +793,7 @@ If the task is complete, use action "done"."""
             "type_text": lambda p: execute_hermes_action("peekxd_type", p).get("result", {}),
             "key": lambda p: execute_hermes_action("peekxd_key", p).get("result", {}),
             "scroll": lambda p: execute_hermes_action("peekxd_scroll", p).get("result", {}),
+            "drag": lambda p: execute_hermes_action("peekxd_drag", p).get("result", {}),
             "focus_window": lambda p: execute_hermes_action("peekxd_focus_window", p).get("result", {}),
             "list_windows": lambda p: execute_hermes_action("peekxd_list_windows", p).get("result", {}),
             "find_element": lambda p: execute_hermes_action("peekxd_find_element", p).get("result", {}),

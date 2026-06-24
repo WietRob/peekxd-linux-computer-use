@@ -164,6 +164,20 @@ HERMES_TOOLS = [
         },
     },
     {
+        "name": "peekxd_drag",
+        "description": "Perform a drag-and-drop operation by holding the left mouse button down while moving from one point to another. Essential for moving files, resizing windows, rearranging UI, and drag-selecting text.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "x1": {"type": "integer", "description": "Starting X coordinate"},
+                "y1": {"type": "integer", "description": "Starting Y coordinate"},
+                "x2": {"type": "integer", "description": "Ending X coordinate"},
+                "y2": {"type": "integer", "description": "Ending Y coordinate"},
+            },
+            "required": ["x1", "y1", "x2", "y2"],
+        },
+    },
+    {
         "name": "peekxd_scroll",
         "description": "Scroll the mouse wheel in a direction.",
         "parameters": {
@@ -342,6 +356,7 @@ def _dispatch_action(name: str, params: Dict[str, Any]) -> Any:
         "peekxd_type": _action_type,
         "peekxd_key": _action_key,
         "peekxd_move_mouse": _action_move_mouse,
+        "peekxd_drag": _action_drag,
         "peekxd_scroll": _action_scroll,
         "peekxd_list_windows": _action_list_windows,
         "peekxd_focus_window": _action_focus_window,
@@ -460,6 +475,14 @@ def _action_move_mouse(params: Dict[str, Any]) -> Dict[str, Any]:
     x, y = params["x"], params["y"]
     input_provider.move_mouse(x, y)
     return {"moved": True, "x": x, "y": y}
+
+
+def _action_drag(params: Dict[str, Any]) -> Dict[str, Any]:
+    input_provider = _get_input()
+    x1, y1 = params["x1"], params["y1"]
+    x2, y2 = params["x2"], params["y2"]
+    input_provider.drag(x1, y1, x2, y2)
+    return {"dragged": True, "from_x": x1, "from_y": y1, "to_x": x2, "to_y": y2}
 
 
 def _action_scroll(params: Dict[str, Any]) -> Dict[str, Any]:
