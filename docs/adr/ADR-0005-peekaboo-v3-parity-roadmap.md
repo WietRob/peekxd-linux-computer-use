@@ -1,6 +1,6 @@
 # ADR-0005: Peekaboo v3 Parity Roadmap
 
-**Status:** Proposed
+**Status:** Proposed — refined by ADR-0006 (v0.4.0 Priorisierung)
 **Date:** 2026-05-19
 **Author:** Hermes Analyst (Kanban task t_cdd3e2d2)
 **Related:** docs/strategy/PEEKABOO_V3_PARITY_AUDIT.md
