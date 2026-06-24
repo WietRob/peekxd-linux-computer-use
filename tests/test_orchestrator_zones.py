@@ -133,12 +133,12 @@ class TestOrchestratorGhostMode:
         assert "*" in preview["params"]["text"]
 
     def test_readonly_action_direct_zone(self):
-        """Read-only actions like capture_screen should be DIRECT."""
+        """Non-pixel read-only actions like list_windows should be DIRECT."""
         orch = AgentOrchestrator(max_steps=5)
-        orch._execute_action = MagicMock(return_value={"success": True, "path": "/tmp/cap.png"})
+        orch._execute_action = MagicMock(return_value={"success": True, "windows": []})
 
-        plan = {"action": "capture_screen", "params": {}, "reason": "observe"}
-        screen_state = {"path": "/tmp/test.png", "description": "test screen"}
+        plan = {"action": "list_windows", "params": {}, "reason": "observe"}
+        screen_state = {"path": None, "description": "semantic screen"}
 
         result = orch._act(plan, screen_state)
 

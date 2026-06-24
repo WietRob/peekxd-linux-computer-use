@@ -1,0 +1,64 @@
+diff --git a/README.md b/README.md
+index 34fc6f0..e5bb2fa 100644
+--- a/README.md
++++ b/README.md
+@@ -193,6 +193,7 @@ peekxd config get vision.default_provider
+ ```
+ 
+ Config location: `~/.config/peekxd/config.json`
++`vision.default_provider` defaults to `hermes` for no-API-key setups.
+ 
+ ### Vision Providers
+ 
+diff --git a/peekxd/config/manager.py b/peekxd/config/manager.py
+index 2eb501d..852d6c4 100644
+--- a/peekxd/config/manager.py
++++ b/peekxd/config/manager.py
+@@ -14,8 +14,8 @@ DEFAULT_CONFIG = {
+         "quality": 95
+     },
+     "vision": {
+-        "providers": ["openai", "anthropic", "ollama"],
+-        "default_provider": "openai",
++        "providers": ["hermes", "openai", "anthropic", "ollama"],
++        "default_provider": "hermes",
+         "openai_model": "gpt-4o",
+         "anthropic_model": "claude-3-opus-20240229",
+         "ollama_model": "llava:latest",
+diff --git a/tests/test_config.py b/tests/test_config.py
+index bf5eb4e..ec18a7e 100644
+--- a/tests/test_config.py
++++ b/tests/test_config.py
+@@ -20,6 +20,14 @@ class TestConfigManager:
+             cm = ConfigManager(str(config_path))
+             assert cm._config == DEFAULT_CONFIG
+ 
++    def test_default_vision_config(self):
++        """Default vision provider configuration prefers Hermes first."""
++        with tempfile.TemporaryDirectory() as tmpdir:
++            config_path = Path(tmpdir) / "config.json"
++            cm = ConfigManager(str(config_path))
++            assert cm.get("vision.default_provider") == "hermes"
++            assert cm.get("vision.providers") == ["hermes", "openai", "anthropic", "ollama"]
++
+     def test_load_existing_config(self):
+         """ConfigManager loads existing config and merges with defaults."""
+         with tempfile.TemporaryDirectory() as tmpdir:
+@@ -33,7 +41,7 @@ class TestConfigManager:
+             assert cm.get("screenshot.quality") == 80
+             # Default keys are preserved through merge
+             assert "vision" in cm._config
+-            assert cm.get("vision.default_provider") == "openai"
++            assert cm.get("vision.default_provider") == "hermes"
+ 
+     def test_save_and_reload(self):
+         """Config can be saved and reloaded."""
+@@ -51,7 +59,7 @@ class TestConfigManager:
+         cm = ConfigManager.__new__(ConfigManager)
+         cm._config = DEFAULT_CONFIG.copy()
+         assert cm.get("screenshot.format") == "png"
+-        assert cm.get("vision.default_provider") == "openai"
++        assert cm.get("vision.default_provider") == "hermes"
+         assert cm.get("vision.ollama_host") == "http://localhost:11434"
+ 
+     def test_get_missing_key_returns_default(self):

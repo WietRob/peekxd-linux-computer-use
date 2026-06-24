@@ -3,42 +3,32 @@
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
+from peekxd.agent.hermes_tools import get_hermes_tool_definitions, execute_hermes_action
 
-from peekxd.agent.hermes_tools import (
-    get_hermes_tool_definitions,
-    execute_hermes_action,
-    HERMES_TOOLS,
-)
+
+def _result(action, params):
+    return json.loads(execute_hermes_action(action, params))
 
 
 class TestToolDefinitions:
-    """Test Hermes tool schema definitions."""
-
     def test_definitions_is_list(self):
-        """Tool definitions should be a list."""
         tools = get_hermes_tool_definitions()
         assert isinstance(tools, list)
         assert len(tools) > 0
 
     def test_each_tool_has_required_fields(self):
-        """Each tool must have name, description, parameters."""
-        tools = get_hermes_tool_definitions()
-        for tool in tools:
+        for tool in get_hermes_tool_definitions():
             assert "name" in tool
             assert "description" in tool
             assert "parameters" in tool
-            assert "type" in tool["parameters"]
             assert tool["parameters"]["type"] == "object"
 
-    def test_known_tools_exist(self):
-        """Verify all expected tools are defined."""
-        tools = get_hermes_tool_definitions()
-        names = {t["name"] for t in tools}
+    def test_semantic_safe_tools_exist_and_screenshot_tools_removed(self):
+        names = {t["name"] for t in get_hermes_tool_definitions()}
         expected = {
-            "peekxd_capture_screen",
-            "peekxd_analyze_screen",
-            "peekxd_find_element",
+            "peekxd_see_semantic",
+            "peekxd_click_element",
+            "peekxd_type_into_element",
             "peekxd_click",
             "peekxd_type",
             "peekxd_key",
@@ -47,79 +37,114 @@ class TestToolDefinitions:
             "peekxd_list_windows",
             "peekxd_focus_window",
             "peekxd_inspect_ui",
+        }
+        assert expected.issubset(names)
+        removed = {
+            "peekxd_capture_screen",
+            "peekxd_analyze_screen",
+            "peekxd_find_element",
             "peekxd_wait",
             "peekxd_run_sequence",
             "peekxd_mark_elements",
             "peekxd_drag",
         }
-        for exp in expected:
-            assert exp in names, f"Missing tool: {exp}"
+        assert names.isdisjoint(removed)
 
 
 class TestActionExecution:
-    """Test Hermes action execution by patching the dispatch layer."""
-
-    def test_unknown_tool(self):
-        """Unknown tool should return error."""
-        result = execute_hermes_action("peekxd_nonexistent", {})
+    def test_unknown_removed_tool(self):
+        result = _result("peekxd_capture_screen", {"mode": "screen"})
         assert result["success"] is False
-        assert "Unknown tool" in result["error"]
+        assert "Unknown or removed" in result["error"]
 
     def test_click_with_coordinates(self):
-        """Test click at coordinates."""
         mock_input = MagicMock()
         with patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input):
-            with patch("peekxd.agent.hermes_tools._get_screenshot", return_value=MagicMock()):
-                result = execute_hermes_action("peekxd_click", {"x": 100, "y": 200, "button": "left"})
+            result = _result("peekxd_click", {"x": 100, "y": 200, "button": "left"})
 
         assert result["success"] is True
-        assert result["result"]["clicked"] is True
+        assert result["action"] == "click"
+        mock_input.click.assert_called_once_with(100, 200, "left")
 
     def test_type(self):
-        """Test type action."""
         mock_input = MagicMock()
         with patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input):
-            result = execute_hermes_action("peekxd_type", {"text": "hello"})
+            result = _result("peekxd_type", {"text": "hello"})
 
         assert result["success"] is True
         mock_input.type_text.assert_called_once_with("hello")
 
-    def test_list_windows(self):
-        """Test list windows."""
-        mock_window = MagicMock()
-        mock_window.list_windows.return_value = [
-            {"id": "123", "title": "Firefox", "class": "firefox"}
+    def test_click_element_looks_up_semantic_bbox_and_clicks_center(self):
+        from peekxd.inspection.base import UIElement
+
+        mock_input = MagicMock()
+        mock_inspection = MagicMock()
+        mock_inspection.get_ui_tree.return_value = [
+            UIElement(
+                id="raw-ok",
+                name="OK",
+                role="button",
+                position=(20, 10),
+                size=(50, 30),
+                attributes={"actions": ["click"]},
+            )
         ]
+        mock_window = MagicMock()
+        mock_window.list_windows.return_value = []
+
+        with (
+            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
+            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
+            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
+        ):
+            result = _result("peekxd_click_element", {"element_id": "W1-B1", "button": "left"})
+
+        assert result == {"success": True, "action": "click_element", "element_id": "W1-B1", "x": 45, "y": 25}
+        mock_input.click.assert_called_once_with(45, 25, "left")
+
+    def test_type_into_element_clicks_semantic_center_then_types_text(self):
+        from peekxd.inspection.base import UIElement
+
+        mock_input = MagicMock()
+        mock_inspection = MagicMock()
+        mock_inspection.get_ui_tree.return_value = [
+            UIElement(id="raw-entry", name="Search", role="text", position=(10, 20), size=(0, 0))
+        ]
+        mock_window = MagicMock()
+        mock_window.list_windows.return_value = []
+
+        with (
+            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
+            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
+            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
+        ):
+            result = _result("peekxd_type_into_element", {"element_id": "W1-T1", "text": "hello"})
+
+        assert result == {"success": True, "action": "type_into_element", "element_id": "W1-T1", "text_length": 5, "x": 10, "y": 20}
+        mock_input.click.assert_called_once_with(10, 20, "left")
+        mock_input.type_text.assert_called_once_with("hello")
+
+    def test_list_windows(self):
+        mock_window = MagicMock()
+        mock_window.list_windows.return_value = [{"id": "123", "title": "Firefox", "class": "firefox"}]
         with patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window):
-            result = execute_hermes_action("peekxd_list_windows", {})
+            result = _result("peekxd_list_windows", {})
 
         assert result["success"] is True
-        assert len(result["result"]) == 1
-
-    def test_capture_screen(self):
-        """Test screen capture."""
-        mock_screenshot = MagicMock()
-        mock_screenshot.capture_screen.return_value = "/tmp/cap.png"
-        with patch("peekxd.agent.hermes_tools._get_screenshot", return_value=mock_screenshot):
-            result = execute_hermes_action("peekxd_capture_screen", {"mode": "screen"})
-
-        assert result["success"] is True
-        assert result["result"]["mode"] == "screen"
+        assert len(result["windows"]) == 1
 
     def test_key_press(self):
-        """Test key press."""
         mock_input = MagicMock()
         with patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input):
-            result = execute_hermes_action("peekxd_key", {"key": "Return"})
+            result = _result("peekxd_key", {"key": "Return"})
 
         assert result["success"] is True
         mock_input.key_press.assert_called_once_with("Return")
 
     def test_hotkey(self):
-        """Test hotkey combination."""
         mock_input = MagicMock()
         with patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input):
-            result = execute_hermes_action("peekxd_key", {"hotkey": ["ctrl", "c"]})
+            result = _result("peekxd_key", {"hotkey": ["ctrl", "c"]})
 
         assert result["success"] is True
         mock_input.hotkey.assert_called_once_with("ctrl", "c")

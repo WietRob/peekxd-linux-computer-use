@@ -193,6 +193,7 @@ peekxd config get vision.default_provider
 ```
 
 Config location: `~/.config/peekxd/config.json`
+`vision.default_provider` defaults to `hermes` for no-API-key setups.
 
 ### Vision Providers
 

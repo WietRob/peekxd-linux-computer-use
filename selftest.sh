@@ -6,7 +6,72 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VERBOSE="${VERBOSE:-0}"
-MODULE_FILTER="${1:-all}"
+MODULE_FILTER="all"
+VALID_MODULES=(all unit desktop screenshot input inspection window vision cli config mcp)
+
+usage() {
+    cat <<EOF
+Usage: ./selftest.sh [--verbose] [--module MODULE]
+       ./selftest.sh [MODULE]
+
+Modules: ${VALID_MODULES[*]}
+EOF
+}
+
+is_valid_module() {
+    local candidate="$1"
+    local module
+    for module in "${VALID_MODULES[@]}"; do
+        if [[ "$candidate" == "$module" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --module|-m)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "Missing module name after $1" >&2
+                    usage >&2
+                    exit 2
+                fi
+                MODULE_FILTER="$2"
+                shift 2
+                ;;
+            --verbose|-v)
+                VERBOSE=1
+                shift
+                ;;
+            --help|-h)
+                usage
+                exit 0
+                ;;
+            --*)
+                echo "Unknown option: $1" >&2
+                usage >&2
+                exit 2
+                ;;
+            *)
+                if [[ "$MODULE_FILTER" != "all" ]]; then
+                    echo "Unexpected argument: $1" >&2
+                    usage >&2
+                    exit 2
+                fi
+                MODULE_FILTER="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if ! is_valid_module "$MODULE_FILTER"; then
+        echo "Unknown module: $MODULE_FILTER" >&2
+        usage >&2
+        exit 2
+    fi
+}
 
 PASSED=0
 FAILED=0
@@ -20,7 +85,7 @@ NC='\033[0m' # No Color
 
 pass() {
     echo -e "${GREEN}PASS${NC}: $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 fail() {
@@ -28,12 +93,12 @@ fail() {
     if [[ $# -gt 1 ]]; then
         echo "      $2"
     fi
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 warn() {
     echo -e "${YELLOW}WARN${NC}: $1"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 }
 
 header() {
@@ -46,7 +111,7 @@ test_python_unit() {
     header "Python Unit Tests"
     cd "$SCRIPT_DIR"
 
-    if ! python3 -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/peekxd_test.log; then
+    if ! python3 -m pytest tests/ -v --tb=short --ignore tests/test_selftest.py 2>&1 | tee /tmp/peekxd_test.log; then
         fail "Unit tests" "See /tmp/peekxd_test.log"
     else
         local count
@@ -291,4 +356,5 @@ main() {
     fi
 }
 
+parse_args "$@"
 main

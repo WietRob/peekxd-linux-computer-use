@@ -36,8 +36,8 @@ def _make_shadow_plan():
 
 
 def _make_direct_plan():
-    """Plan that triggers DIRECT zone (capture_screen)."""
-    return {"action": "capture_screen", "params": {}, "reason": "test"}
+    """Plan that triggers DIRECT zone without pixel capture."""
+    return {"action": "list_windows", "params": {}, "reason": "test"}
 
 
 def _screen_state():
@@ -172,6 +172,29 @@ class TestGhostWithOverlay:
 
         assert result["ghost"] is True
         assert "overlay_decision" in result
+
+    def test_force_ghost_overlay_ignores_stale_screenshot_path(self):
+        """Semantic-only _see() makes screenshot paths unavailable to overlays."""
+        orch = _make_orchestrator(
+            force_ghost=True,
+            enable_ghost_overlay=True,
+            screenshot_provider=None,
+        )
+        mock_ctrl = MagicMock()
+        mock_ctrl.show_preview.return_value = OverlayDecision(
+            timed_out=True, backend="noop", reason="Timeout"
+        )
+        orch._overlay_controller = mock_ctrl
+
+        result = orch._act(
+            {"action": "click", "params": {"x": 10, "y": 20}, "reason": "test"},
+            {"path": "/tmp/stale-screen.png", "description": "semantic screen"},
+        )
+
+        assert result["ghost"] is True
+        mock_ctrl.show_preview.assert_called_once()
+        request = mock_ctrl.show_preview.call_args.args[0]
+        assert request.screenshot_path is None
 
 
 class TestShadowUnchanged:

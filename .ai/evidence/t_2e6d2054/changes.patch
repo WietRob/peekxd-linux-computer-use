@@ -1,0 +1,309 @@
+diff --git a/peekxd/agent/hermes_tools.py b/peekxd/agent/hermes_tools.py
+index b9c0902..cd3b740 100644
+--- a/peekxd/agent/hermes_tools.py
++++ b/peekxd/agent/hermes_tools.py
+@@ -50,6 +50,37 @@ HERMES_TOOLS = [
+             "required": ["x", "y"],
+         },
+     },
++    {
++        "name": "peekxd_click_element",
++        "description": "Click a semantic element by id using the center of its current bounding box.",
++        "parameters": {
++            "type": "object",
++            "properties": {
++                "element_id": {"type": "string"},
++                "app_name": {"type": "string"},
++                "window_id": {"type": "string"},
++                "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
++                "scale": {"type": "number", "default": 1.0},
++            },
++            "required": ["element_id"],
++        },
++    },
++    {
++        "name": "peekxd_type_into_element",
++        "description": "Focus a semantic element by id, then type text into it.",
++        "parameters": {
++            "type": "object",
++            "properties": {
++                "element_id": {"type": "string"},
++                "text": {"type": "string"},
++                "app_name": {"type": "string"},
++                "window_id": {"type": "string"},
++                "button": {"type": "string", "enum": ["left", "right", "middle"], "default": "left"},
++                "scale": {"type": "number", "default": 1.0},
++            },
++            "required": ["element_id", "text"],
++        },
++    },
+     {
+         "name": "peekxd_type",
+         "description": "Type text at the current cursor position.",
+@@ -111,6 +142,32 @@ def execute_hermes_action(action_name: str, params: Dict[str, Any]) -> str:
+         elif action_name == "peekxd_click":
+             _get_input().click(params["x"], params["y"], params.get("button", "left"))
+             result = {"success": True, "action": "click", "x": params["x"], "y": params["y"]}
++        elif action_name in {"peekxd_click_element", "peekxd_type_into_element"}:
++            from ..semantic import build_semantic_snapshot, find_semantic_element
++
++            envelope = build_semantic_snapshot(
++                app=params.get("app_name"),
++                window_id=params.get("window_id"),
++                inspection_provider=_get_inspection(),
++                window_provider=_get_window(),
++            )
++            element = find_semantic_element(envelope, params["element_id"])
++            input_provider = _get_input()
++            scale = float(params.get("scale", 1.0))
++            button = params.get("button", "left")
++            if action_name == "peekxd_click_element":
++                x, y = element.click_center(input_provider, button=button, scale=scale)
++                result = {"success": True, "action": "click_element", "element_id": element.element_id, "x": x, "y": y}
++            else:
++                x, y = element.type_into(input_provider, params["text"], button=button, scale=scale)
++                result = {
++                    "success": True,
++                    "action": "type_into_element",
++                    "element_id": element.element_id,
++                    "text_length": len(params["text"]),
++                    "x": x,
++                    "y": y,
++                }
+         elif action_name == "peekxd_type":
+             _get_input().type_text(params["text"])
+             result = {"success": True, "action": "type", "text_length": len(params["text"])}
+diff --git a/peekxd/semantic.py b/peekxd/semantic.py
+index 36da14b..af88fbc 100644
+--- a/peekxd/semantic.py
++++ b/peekxd/semantic.py
+@@ -22,6 +22,19 @@ class Geometry:
+     width: int
+     height: int
+ 
++    def center(self, *, scale: float = 1.0) -> Tuple[int, int]:
++        """Return the scaled center point for this rectangle.
++
++        Zero-width or zero-height accessibility bounds intentionally map to the
++        element origin. Some providers report caret/text nodes this way, and the
++        origin remains the only actionable coordinate available.
++        """
++        if scale <= 0:
++            raise ValueError("scale must be greater than zero")
++        center_x = self.x if self.width <= 0 else self.x + (self.width / 2)
++        center_y = self.y if self.height <= 0 else self.y + (self.height / 2)
++        return int(round(center_x * scale)), int(round(center_y * scale))
++
+ 
+ @dataclass(frozen=True)
+ class SemanticWindow:
+@@ -47,6 +60,53 @@ class SemanticElement:
+     path: str
+     confidence: float
+ 
++    def click_center(self, input_provider: Any, *, button: str = "left", scale: float = 1.0) -> Tuple[int, int]:
++        """Click this element's bounding-box center and return the coordinates used."""
++        x, y = self.bbox.center(scale=scale)
++        input_provider.click(x, y, button)
++        return x, y
++
++    def type_into(self, input_provider: Any, text: str, *, button: str = "left", scale: float = 1.0) -> Tuple[int, int]:
++        """Focus this element by center-clicking it, then type text into it."""
++        x, y = self.click_center(input_provider, button=button, scale=scale)
++        input_provider.type_text(text)
++        return x, y
++
++
++def _geometry_from_mapping(raw: Dict[str, Any]) -> Geometry:
++    return Geometry(
++        x=int(raw.get("x", 0) or 0),
++        y=int(raw.get("y", 0) or 0),
++        width=int(raw.get("width", 0) or 0),
++        height=int(raw.get("height", 0) or 0),
++    )
++
++
++def semantic_element_from_mapping(raw: Dict[str, Any]) -> SemanticElement:
++    """Rehydrate a ``SemanticElement`` from a snapshot element dictionary."""
++    bbox = raw.get("bbox", {}) or {}
++    return SemanticElement(
++        element_id=str(raw.get("element_id") or ""),
++        raw_element_id=str(raw.get("raw_element_id") or ""),
++        window_id=str(raw.get("window_id") or ""),
++        role=str(raw.get("role") or ""),
++        name=str(raw.get("name") or ""),
++        label=str(raw.get("label") or ""),
++        bbox=_geometry_from_mapping(bbox),
++        state=dict(raw.get("state") or {}),
++        actions=[str(action) for action in (raw.get("actions") or [])],
++        path=str(raw.get("path") or ""),
++        confidence=float(raw.get("confidence", 0.0) or 0.0),
++    )
++
++
++def find_semantic_element(envelope: Dict[str, Any], element_id: str) -> SemanticElement:
++    """Find and rehydrate a semantic element by stable id from an envelope."""
++    for raw in envelope.get("snapshot", {}).get("elements", []) or []:
++        if raw.get("element_id") == element_id:
++            return semantic_element_from_mapping(raw)
++    raise ValueError(f"semantic element not found: {element_id}")
++
+ 
+ def _snapshot_id(now: Optional[datetime] = None) -> str:
+     now = now or datetime.now(timezone.utc)
+diff --git a/tests/test_agent_hermes_tools.py b/tests/test_agent_hermes_tools.py
+index 10bc75d..5e9dc9d 100644
+--- a/tests/test_agent_hermes_tools.py
++++ b/tests/test_agent_hermes_tools.py
+@@ -27,6 +27,8 @@ class TestToolDefinitions:
+         names = {t["name"] for t in get_hermes_tool_definitions()}
+         expected = {
+             "peekxd_see_semantic",
++            "peekxd_click_element",
++            "peekxd_type_into_element",
+             "peekxd_click",
+             "peekxd_type",
+             "peekxd_key",
+@@ -71,6 +73,56 @@ class TestActionExecution:
+         assert result["success"] is True
+         mock_input.type_text.assert_called_once_with("hello")
+ 
++    def test_click_element_looks_up_semantic_bbox_and_clicks_center(self):
++        from peekxd.inspection.base import UIElement
++
++        mock_input = MagicMock()
++        mock_inspection = MagicMock()
++        mock_inspection.get_ui_tree.return_value = [
++            UIElement(
++                id="raw-ok",
++                name="OK",
++                role="button",
++                position=(20, 10),
++                size=(50, 30),
++                attributes={"actions": ["click"]},
++            )
++        ]
++        mock_window = MagicMock()
++        mock_window.list_windows.return_value = []
++
++        with (
++            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
++            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
++            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
++        ):
++            result = _result("peekxd_click_element", {"element_id": "W1-B1", "button": "left"})
++
++        assert result == {"success": True, "action": "click_element", "element_id": "W1-B1", "x": 45, "y": 25}
++        mock_input.click.assert_called_once_with(45, 25, "left")
++
++    def test_type_into_element_clicks_semantic_center_then_types_text(self):
++        from peekxd.inspection.base import UIElement
++
++        mock_input = MagicMock()
++        mock_inspection = MagicMock()
++        mock_inspection.get_ui_tree.return_value = [
++            UIElement(id="raw-entry", name="Search", role="text", position=(10, 20), size=(0, 0))
++        ]
++        mock_window = MagicMock()
++        mock_window.list_windows.return_value = []
++
++        with (
++            patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input),
++            patch("peekxd.agent.hermes_tools._get_inspection", return_value=mock_inspection),
++            patch("peekxd.agent.hermes_tools._get_window", return_value=mock_window),
++        ):
++            result = _result("peekxd_type_into_element", {"element_id": "W1-T1", "text": "hello"})
++
++        assert result == {"success": True, "action": "type_into_element", "element_id": "W1-T1", "text_length": 5, "x": 10, "y": 20}
++        mock_input.click.assert_called_once_with(10, 20, "left")
++        mock_input.type_text.assert_called_once_with("hello")
++
+     def test_list_windows(self):
+         mock_window = MagicMock()
+         mock_window.list_windows.return_value = [{"id": "123", "title": "Firefox", "class": "firefox"}]
+diff --git a/tests/test_semantic_action_mapping.py b/tests/test_semantic_action_mapping.py
+new file mode 100644
+index 0000000..e2de3cb
+--- /dev/null
++++ b/tests/test_semantic_action_mapping.py
+@@ -0,0 +1,79 @@
++"""Tests for semantic element action mapping helpers."""
++
++from unittest.mock import MagicMock
++
++import pytest
++
++from peekxd.semantic import Geometry, SemanticElement, find_semantic_element
++
++
++def _element(bbox):
++    return SemanticElement(
++        element_id="W1-B1",
++        raw_element_id="raw-1",
++        window_id="W1",
++        role="button",
++        name="OK",
++        label="OK",
++        bbox=bbox,
++        state={"enabled": True},
++        actions=["click"],
++        path="W1 > button[W1-B1]",
++        confidence=0.9,
++    )
++
++
++def test_click_center_maps_bbox_to_center_coordinates():
++    element = _element(Geometry(x=20, y=10, width=50, height=30))
++    input_provider = MagicMock()
++
++    assert element.click_center(input_provider) == (45, 25)
++    input_provider.click.assert_called_once_with(45, 25, "left")
++
++
++def test_click_center_applies_hidpi_scale():
++    element = _element(Geometry(x=10, y=20, width=30, height=30))
++    input_provider = MagicMock()
++
++    assert element.click_center(input_provider, scale=2.0) == (50, 70)
++    input_provider.click.assert_called_once_with(50, 70, "left")
++
++
++def test_type_into_clicks_zero_size_element_origin_before_typing():
++    element = _element(Geometry(x=10, y=20, width=0, height=0))
++    input_provider = MagicMock()
++
++    assert element.type_into(input_provider, "hello") == (10, 20)
++    input_provider.click.assert_called_once_with(10, 20, "left")
++    input_provider.type_text.assert_called_once_with("hello")
++
++
++def test_find_semantic_element_rehydrates_element_from_snapshot_dict():
++    envelope = {
++        "snapshot": {
++            "elements": [
++                {
++                    "element_id": "W1-B1",
++                    "raw_element_id": "raw-1",
++                    "window_id": "W1",
++                    "role": "button",
++                    "name": "OK",
++                    "label": "OK",
++                    "bbox": {"x": 1, "y": 2, "width": 3, "height": 4},
++                    "state": {"enabled": True},
++                    "actions": ["click"],
++                    "path": "W1 > button[W1-B1]",
++                    "confidence": 0.9,
++                }
++            ]
++        }
++    }
++
++    element = find_semantic_element(envelope, "W1-B1")
++
++    assert element.bbox == Geometry(x=1, y=2, width=3, height=4)
++
++
++def test_find_semantic_element_raises_for_missing_element_id():
++    with pytest.raises(ValueError, match="semantic element not found: W1-B2"):
++        find_semantic_element({"snapshot": {"elements": []}}, "W1-B2")
+\ No newline at end of file

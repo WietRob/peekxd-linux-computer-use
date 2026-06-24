@@ -52,33 +52,43 @@ class TestMCPServer:
         tool_names = [f.__name__ for f in registered]
 
         expected_tools = [
-            "capture_screen",
+            "see_semantic",
             "move_mouse",
             "click",
             "type_text",
+            "scroll",
             "press_key",
             "list_windows",
             "focus_window",
             "get_ui_tree",
             "find_element",
-            "analyze_image",
             "get_active_window",
         ]
         for tool_name in expected_tools:
             assert tool_name in tool_names, f"Tool {tool_name} not registered"
+        removed_tools = {"capture_screen", "mark_elements", "find_and_click", "type_into_field", "analyze_image", "screen_has_changed"}
+        assert not removed_tools.intersection(tool_names)
 
-    @patch("peekxd.mcp_server.server._get_screenshot")
-    def test_capture_screen(self, mock_get_screenshot, config):
-        """capture_screen tool delegates to screenshot provider."""
-        mock_provider = MagicMock()
-        mock_provider.capture_screen.return_value = "/tmp/test.png"
-        mock_get_screenshot.return_value = mock_provider
+    @patch("peekxd.mcp_server.server._get_window")
+    @patch("peekxd.mcp_server.server._get_inspection")
+    def test_see_semantic_tool_returns_snapshot_without_screenshot(self, mock_get_inspection, mock_get_window, config):
+        """see_semantic returns the non-visual envelope and has no screenshot dependency."""
+        from peekxd.inspection.base import UIElement
+
+        inspection = MagicMock()
+        inspection.get_ui_tree.return_value = [UIElement("raw", "Search", "button", (1, 2), (3, 4), None, [], {})]
+        mock_get_inspection.return_value = inspection
+        window = MagicMock()
+        window.list_windows.return_value = [{"id": "win", "title": "Browser", "class": "firefox"}]
+        mock_get_window.return_value = window
 
         registered, _ = self._collect_tools(config)
-        capture_screen_func = [f for f in registered if f.__name__ == "capture_screen"][0]
-        result = capture_screen_func(output_path="/tmp/out.png", mode="screen")
-        assert result["success"] is True
-        assert result["mode"] == "screen"
+        see_semantic_func = [f for f in registered if f.__name__ == "see_semantic"][0]
+        result = see_semantic_func(app_name="firefox")
+
+        assert result["schema_version"] == "peekxd.see.v1"
+        assert result["result"]["ok"] is True
+        assert result["snapshot"]["elements"][0]["element_id"] == "W1-B1"
 
     @patch("peekxd.mcp_server.server._get_input")
     def test_move_mouse(self, mock_get_input, config):
@@ -119,6 +129,18 @@ class TestMCPServer:
         assert result["success"] is True
         assert result["text"] == "hello"
         mock_provider.type_text.assert_called_once_with("hello")
+
+    @patch("peekxd.mcp_server.server._get_input")
+    def test_scroll(self, mock_get_input, config):
+        """scroll tool delegates direction and amount to input provider."""
+        mock_provider = MagicMock()
+        mock_get_input.return_value = mock_provider
+
+        registered, _ = self._collect_tools(config)
+        scroll_func = [f for f in registered if f.__name__ == "scroll"][0]
+        result = scroll_func(direction="up", amount=5)
+        assert result == {"success": True, "direction": "up", "amount": 5}
+        mock_provider.scroll.assert_called_once_with("up", 5)
 
     @patch("peekxd.mcp_server.server._get_input")
     def test_press_key(self, mock_get_input, config):

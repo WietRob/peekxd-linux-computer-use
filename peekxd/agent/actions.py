@@ -50,7 +50,7 @@ class ActionSequence:
 
     # --- Builder methods ---
 
-    def click(self, x: int, y: int, button: str = "left", description: str = "", delay_after: float = 0.5):
+    def click(self, x: int, y: int, button: str = "left", description: str = "", delay_after: float = 0.5) -> "ActionSequence":
         """Add a click action."""
         self.steps.append(ActionStep(
             action="click",
@@ -60,7 +60,7 @@ class ActionSequence:
         ))
         return self
 
-    def find_click(self, description: str, button: str = "left", retry: int = 3, delay_after: float = 0.5):
+    def find_click(self, description: str, button: str = "left", retry: int = 3, delay_after: float = 0.5) -> "ActionSequence":
         """Add a find-and-click action using vision."""
         self.steps.append(ActionStep(
             action="find_click",
@@ -71,7 +71,7 @@ class ActionSequence:
         ))
         return self
 
-    def type(self, text: str, description: str = "", delay_after: float = 0.3):
+    def type(self, text: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a type action."""
         self.steps.append(ActionStep(
             action="type",
@@ -81,7 +81,7 @@ class ActionSequence:
         ))
         return self
 
-    def key(self, key_name: str, description: str = "", delay_after: float = 0.3):
+    def key(self, key_name: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a key press action."""
         self.steps.append(ActionStep(
             action="key",
@@ -91,7 +91,7 @@ class ActionSequence:
         ))
         return self
 
-    def hotkey(self, *keys: str, description: str = "", delay_after: float = 0.3):
+    def hotkey(self, *keys: str, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a hotkey action."""
         self.steps.append(ActionStep(
             action="hotkey",
@@ -101,17 +101,17 @@ class ActionSequence:
         ))
         return self
 
-    def move(self, x: int, y: int, description: str = "", delay_after: float = 0.2):
+    def move(self, x: int, y: int, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a mouse move action."""
         self.steps.append(ActionStep(
             action="move",
             params={"x": x, "y": y},
-            description=description or f"Move mouse to ({x},{y})",
+            description=description or f"Move to ({x},{y})",
             delay_after=delay_after,
         ))
         return self
 
-    def scroll(self, direction: str = "down", amount: int = 3, description: str = "", delay_after: float = 0.3):
+    def scroll(self, direction: str = "down", amount: int = 3, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
         """Add a scroll action."""
         self.steps.append(ActionStep(
             action="scroll",
@@ -121,7 +121,7 @@ class ActionSequence:
         ))
         return self
 
-    def wait(self, seconds: float, description: str = ""):
+    def wait(self, seconds: float = 1.0, description: str = "") -> "ActionSequence":
         """Add a wait action."""
         self.steps.append(ActionStep(
             action="wait",
@@ -131,33 +131,40 @@ class ActionSequence:
         ))
         return self
 
-    def capture(self, output_path: Optional[str] = None, description: str = "", delay_after: float = 0.5):
-        """Add a screenshot capture action."""
+    def capture(self, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
+        """Add a screen capture action."""
         self.steps.append(ActionStep(
             action="capture",
-            params={"output_path": output_path or os.path.join(tempfile.gettempdir(), f"seq_capture_{int(time.time())}.png")},
-            description=description or "Capture screenshot",
+            params={},
+            description=description or "Capture screen",
             delay_after=delay_after,
         ))
         return self
 
-    # --- Execution ---
+    def wait_for_change(self, timeout: float = 10.0, description: str = "", delay_after: float = 0.3) -> "ActionSequence":
+        """Add a wait-for-screen-change action."""
+        self.steps.append(ActionStep(
+            action="wait_for_change",
+            params={"timeout": timeout},
+            description=description or f"Wait for change ({timeout}s)",
+            delay_after=delay_after,
+        ))
+        return self
+
+    def wait_for_element(self, description: str, timeout: float = 10.0, delay_after: float = 0.3) -> "ActionSequence":
+        """Add a wait-for-element action using vision."""
+        self.steps.append(ActionStep(
+            action="wait_for_element",
+            params={"description": description, "timeout": timeout},
+            description=f"Wait for element: {description}",
+            delay_after=delay_after,
+        ))
+        return self
 
     def execute(self, stop_on_error: bool = True) -> List[Dict[str, Any]]:
-        """Execute all steps in the sequence.
-
-        Args:
-            stop_on_error: If True, stop on first failure. If False, continue.
-
-        Returns:
-            List of result dicts for each step.
-        """
-        from ..screenshot import get_screenshot_provider
+        """Execute all steps in the sequence."""
         from ..input import get_input_provider
-        from ..vision import get_vision_provider
 
-        if self._screenshot is None:
-            self._screenshot = get_screenshot_provider()
         if self._input is None:
             self._input = get_input_provider()
 
@@ -176,7 +183,7 @@ class ActionSequence:
                     result["error"] = str(exc)
                     result["attempts"] = attempt + 1
                     if attempt < step.retry - 1:
-                        time.sleep(0.5 * (attempt + 1))  # Exponential-ish backoff
+                        time.sleep(0.5 * (attempt + 1))
 
             self.results.append(result)
 
@@ -197,18 +204,7 @@ class ActionSequence:
             result["detail"] = f"clicked at ({p['x']},{p['y']})"
 
         elif step.action == "find_click":
-            # Need vision provider for this
-            from ..vision import get_vision_provider
-            if self._vision is None:
-                self._vision = get_vision_provider()
-            # Capture screen first
-            cap_path = os.path.join(tempfile.gettempdir(), "find_click_cap.png")
-            self._screenshot.capture_screen(cap_path)
-            coords = self._vision.find_element(cap_path, p["description"])
-            if coords is None:
-                raise peekxdError(f"Element not found: {p['description']}")
-            self._input.click(coords[0], coords[1], p.get("button", "left"))
-            result["detail"] = f"found and clicked at ({coords[0]},{coords[1]})"
+            raise peekxdError("Screenshot/vision find_click was removed; use semantic element IDs from `peekxd see --semantic`.")
 
         elif step.action == "type":
             self._input.type_text(p["text"])
@@ -235,9 +231,16 @@ class ActionSequence:
             result["detail"] = f"waited {p['seconds']}s"
 
         elif step.action == "capture":
-            path = self._screenshot.capture_screen(p["output_path"])
-            result["detail"] = f"captured {path}"
-            result["path"] = path
+            result["detail"] = "capture skipped (screenshot removed)"
+
+        elif step.action == "wait_for_change":
+            result["detail"] = "wait_for_change skipped (screenshot removed)"
+
+        elif step.action == "wait_for_element":
+            result["detail"] = "wait_for_element skipped (vision removed)"
+
+        else:
+            raise peekxdError(f"Unknown action: {step.action}")
 
     def to_dict(self) -> List[Dict[str, Any]]:
         """Serialize the sequence to a list of dicts."""
@@ -275,36 +278,9 @@ class ScreenDiff:
         self.last_hash: Optional[str] = None
 
     def capture_and_hash(self, output_path: Optional[str] = None) -> Tuple[str, str]:
-        """Capture a screenshot and compute its hash.
-
-        Returns:
-            (path, hash) tuple.
-        """
-        from ..screenshot import get_screenshot_provider
-
-        if output_path is None:
-            output_path = os.path.join(tempfile.gettempdir(), f"diff_cap_{int(time.time())}.png")
-
-        provider = get_screenshot_provider()
-        path = provider.capture_screen(output_path)
-
-        # Compute perceptual hash
-        try:
-            from PIL import Image
-            img = Image.open(path)
-            img_small = img.resize((16, 16)).convert("L")
-            pixels = list(img_small.getdata())
-            avg = sum(pixels) / len(pixels)
-            bits = "".join("1" if p > avg else "0" for p in pixels)
-            hash_val = hex(int(bits, 2))[2:].zfill(16)
-        except Exception:
-            # Fallback: file hash
-            with open(path, "rb") as f:
-                hash_val = hashlib.md5(f.read()).hexdigest()[:16]
-
-        self.last_screenshot = path
-        self.last_hash = hash_val
-        return path, hash_val
+        """Screenshot diffing was removed with pixel capture."""
+        del output_path
+        raise peekxdError("ScreenDiff was removed because it requires screenshot capture; use semantic state polling instead.")
 
     def has_changed(self, threshold: float = 0.1) -> bool:
         """Check if the screen has changed since last capture.
@@ -428,36 +404,8 @@ class WaitCondition:
         Returns:
             Dict with 'found', 'position', 'elapsed', 'screenshot_path'.
         """
-        from ..screenshot import get_screenshot_provider
-        from ..vision import get_vision_provider
-
-        if vision_provider is None:
-            vision_provider = get_vision_provider()
-        if screenshot_provider is None:
-            screenshot_provider = get_screenshot_provider()
-
-        start = time.time()
-        cap_path = os.path.join(tempfile.gettempdir(), "wait_element.png")
-
-        while time.time() - start < timeout:
-            screenshot_provider.capture_screen(cap_path)
-            coords = vision_provider.find_element(cap_path, description)
-            if coords is not None:
-                elapsed = time.time() - start
-                return {
-                    "found": True,
-                    "position": coords,
-                    "elapsed": round(elapsed, 2),
-                    "screenshot_path": cap_path,
-                }
-            time.sleep(poll_interval)
-
-        return {
-            "found": False,
-            "position": None,
-            "elapsed": round(time.time() - start, 2),
-            "screenshot_path": cap_path,
-        }
+        del description, timeout, poll_interval, vision_provider, screenshot_provider
+        raise peekxdError("Vision/screenshot wait_for_element was removed; use AT-SPI semantic polling instead.")
 
     @staticmethod
     def for_text(
@@ -471,37 +419,8 @@ class WaitCondition:
 
         Uses vision analysis to check if the text is visible.
         """
-        from ..screenshot import get_screenshot_provider
-        from ..vision import get_vision_provider
-
-        if vision_provider is None:
-            vision_provider = get_vision_provider()
-        if screenshot_provider is None:
-            screenshot_provider = get_screenshot_provider()
-
-        start = time.time()
-        cap_path = os.path.join(tempfile.gettempdir(), "wait_text.png")
-        prompt = f'Is the text "{text}" visible on this screen? Answer ONLY "yes" or "no".'
-
-        while time.time() - start < timeout:
-            screenshot_provider.capture_screen(cap_path)
-            result = vision_provider.analyze(cap_path, prompt).strip().lower()
-            if result.startswith("yes"):
-                elapsed = time.time() - start
-                return {
-                    "found": True,
-                    "text": text,
-                    "elapsed": round(elapsed, 2),
-                    "screenshot_path": cap_path,
-                }
-            time.sleep(poll_interval)
-
-        return {
-            "found": False,
-            "text": text,
-            "elapsed": round(time.time() - start, 2),
-            "screenshot_path": cap_path,
-        }
+        del text, timeout, poll_interval, vision_provider, screenshot_provider
+        raise peekxdError("Vision/screenshot wait_for_text was removed; use AT-SPI semantic polling instead.")
 
     @staticmethod
     def for_no_change(
