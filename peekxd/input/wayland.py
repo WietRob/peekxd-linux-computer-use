@@ -28,10 +28,36 @@ _SCROLL_MAP = {
 # Known socket paths for the ydotoold daemon
 _YDOTOOLD_SOCKET_PATHS = [
     "/run/ydotoold/socket",
-    "/run/user/1000/ydotoold/socket",
     "/tmp/.ydotool_socket",
     "/tmp/ydotoold/socket",
 ]
+
+
+def _ydotoold_socket_paths() -> list[str]:
+    """Return ydotoold socket paths in priority order.
+
+    Priority:
+    1) Explicit override via ``PEEKXD_YDOTOOLD_SOCKET``
+    2) Runtime socket from ``XDG_RUNTIME_DIR``
+    3) Runtime socket derived from current UID
+    4) Shared/common fallback locations
+    """
+    socket_override = os.environ.get("PEEKXD_YDOTOOLD_SOCKET")
+    if socket_override:
+        return [socket_override]
+
+    runtime_user = os.getuid()
+    paths = [f"/run/user/{runtime_user}/ydotoold/socket"]
+
+    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg_runtime_dir:
+        paths.insert(0, os.path.join(xdg_runtime_dir, "ydotoold", "socket"))
+
+    for path in _YDOTOOLD_SOCKET_PATHS:
+        if path not in paths:
+            paths.append(path)
+
+    return paths
 
 
 def _ydotoold_running() -> bool:
@@ -40,7 +66,7 @@ def _ydotoold_running() -> bool:
     ydotool requires the daemon to be running in order to function.
     This checks a few common socket locations.
     """
-    for path in _YDOTOOLD_SOCKET_PATHS:
+    for path in _ydotoold_socket_paths():
         if Path(path).exists():
             return True
     return False

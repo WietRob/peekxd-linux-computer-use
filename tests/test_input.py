@@ -279,14 +279,37 @@ class TestWaylandAvailability:
     @patch("peekxd.input.wayland.Path.exists")
     def test_ydotoold_running_checks_socket_paths(self, mock_exists: MagicMock) -> None:
         """The daemon check should iterate through known socket paths."""
-        mock_exists.side_effect = [False, False, True]  # third path exists
-        result = _ydotoold_running()
+        mock_exists.side_effect = [False, False, False, True]  # socket is on 4th path
+        with patch.dict(os.environ, {}, clear=True):
+            result = _ydotoold_running()
         assert result is True
-        assert mock_exists.call_count == 3
+        assert mock_exists.call_count == 4
+
+    @patch("peekxd.input.wayland.Path")
+    @patch("peekxd.input.wayland.os.getuid", return_value=1234)
+    def test_ydotoold_running_checks_dynamic_uid_path(self, mock_getuid: MagicMock, mock_path: MagicMock) -> None:
+        """Socket detection should prefer the current user runtime path."""
+        del mock_getuid
+        seen_paths: list[str] = []
+
+        def make_path(path: str) -> MagicMock:
+            seen_paths.append(path)
+            candidate = MagicMock()
+            candidate.exists.return_value = path == "/run/user/1234/ydotoold/socket"
+            return candidate
+
+        mock_path.side_effect = make_path
+
+        with patch.dict(os.environ, {}, clear=True):
+            result = _ydotoold_running()
+
+        assert result is True
+        assert seen_paths[0] == "/run/user/1234/ydotoold/socket"
 
     @patch("peekxd.input.wayland.Path.exists", return_value=False)
     def test_ydotoold_running_returns_false_when_no_socket(self, mock_exists: MagicMock) -> None:
-        result = _ydotoold_running()
+        with patch.dict(os.environ, {}, clear=True):
+            result = _ydotoold_running()
         assert result is False
 
 
