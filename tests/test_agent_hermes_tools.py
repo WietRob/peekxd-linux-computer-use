@@ -150,17 +150,8 @@ class TestActionExecution:
         mock_input.hotkey.assert_called_once_with("ctrl", "c")
 
     def test_drag(self):
-        """Test drag action with coordinates."""
-        mock_input = MagicMock()
-        with patch("peekxd.agent.hermes_tools._get_input", return_value=mock_input):
-            result = execute_hermes_action("peekxd_drag", {
-                "x1": 100, "y1": 200, "x2": 300, "y2": 400,
-            })
+        """Drag is intentionally absent from the semantic-safe Hermes tool surface."""
+        result = _result("peekxd_drag", {"x1": 100, "y1": 200, "x2": 300, "y2": 400})
 
-        assert result["success"] is True
-        assert result["result"]["dragged"] is True
-        assert result["result"]["from_x"] == 100
-        assert result["result"]["from_y"] == 200
-        assert result["result"]["to_x"] == 300
-        assert result["result"]["to_y"] == 400
-        mock_input.drag.assert_called_once_with(100, 200, 300, 400)
+        assert result["success"] is False
+        assert "Unknown or removed" in result["error"]

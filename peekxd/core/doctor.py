@@ -170,14 +170,14 @@ def _check_screenshot(*, smoke: bool = False, smoke_dir: Optional[Path] = None) 
 
 def _check_input(*, smoke: bool = False, smoke_dir: Optional[Path] = None) -> DoctorCheck:
     del smoke, smoke_dir
-    tools = _tool_map(["xdotool", "ydotool"])
+    tools = _tool_map(["xdotool", "ydotool", "wtype"])
     evidence = {"tools": tools}
     try:
         provider = get_input_provider()
         provider_label = _safe_provider_label(provider)
         return DoctorCheck("input", CapabilityStatus.OK, provider_label, f"Input provider detected via {provider_label}; no click/type smoke performed", evidence, "", False)
     except Exception as exc:
-        return DoctorCheck("input", CapabilityStatus.BLOCKED, "none", f"No input provider available: {exc}", evidence, "Install xdotool for X11 or ydotool plus a running ydotoold daemon for Wayland.", False)
+        return DoctorCheck("input", CapabilityStatus.BLOCKED, "none", f"No input provider available: {exc}", evidence, "Install xdotool for X11, or wtype / ydotool plus a running ydotoold daemon for Wayland.", False)
 
 
 def _check_window(*, smoke: bool = False, smoke_dir: Optional[Path] = None) -> DoctorCheck:

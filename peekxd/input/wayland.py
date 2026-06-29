@@ -1,12 +1,11 @@
-"""Wayland input provider using ydotool."""
+"""Wayland input provider using wtype for keyboard and ydotool for pointer input."""
 
 import os
 from pathlib import Path
 
-from peekxd.core.utils import run_command, executable_available
 from peekxd.core.errors import InputError
+from peekxd.core.utils import executable_available, run_command
 from peekxd.input.base import InputProvider
-
 
 # Button mapping for ydotool: 0xC0=left, 0xC1=right, 0xC2=middle
 # Per ydotool documentation, we use decimal values passed as strings.
@@ -62,16 +61,23 @@ def _ydotoold_running() -> bool:
 
 
 class WaylandInputProvider(InputProvider):
-    """Input provider for Wayland sessions using ydotool.
+    """Input provider for Wayland sessions.
 
-    Requires the ``ydotool`` executable to be installed and the
-    ``ydotoold`` daemon to be running.
+    Uses ``wtype`` for text/key input when available because it does not
+    require a daemon. Falls back to ``ydotool`` for keyboard input and always
+    uses ``ydotool`` for pointer operations.
     """
+
+    def __init__(self) -> None:
+        """Detect available Wayland input helpers once for this provider."""
+        self.wtype_available = executable_available("wtype")
+        self.ydotool_available = executable_available("ydotool")
+        self.ydotoold_available = self.ydotool_available and _ydotoold_running()
 
     @property
     def available(self) -> bool:
-        """Return True if ydotool is installed and the daemon is running."""
-        return executable_available("ydotool") and _ydotoold_running()
+        """Return True when either wtype or ydotool input is available."""
+        return self.wtype_available or self.ydotoold_available
 
     def _run(self, *args: str) -> None:
         """Run a ydotool command with the given arguments.
@@ -88,6 +94,24 @@ class WaylandInputProvider(InputProvider):
         except Exception as exc:
             raise InputError(
                 f"ydotool command failed: {' '.join(cmd)}",
+                details={"command": cmd, "error": str(exc)},
+            ) from exc
+
+    def _run_wtype(self, *args: str) -> None:
+        """Run a wtype command with the given arguments.
+
+        Args:
+            *args: Arguments to pass to wtype.
+
+        Raises:
+            InputError: If the command fails.
+        """
+        cmd = ["wtype", *args]
+        try:
+            run_command(cmd)
+        except Exception as exc:
+            raise InputError(
+                f"wtype command failed: {' '.join(cmd)}",
                 details={"command": cmd, "error": str(exc)},
             ) from exc
 
@@ -138,11 +162,16 @@ class WaylandInputProvider(InputProvider):
     def type_text(self, text: str) -> None:
         """Type the given text.
 
-        Single quotes in the text are escaped to prevent shell issues.
+        ``wtype`` receives text directly without shell quoting. The ydotool
+        fallback keeps the historical escaping behavior.
 
         Args:
             text: The text to type.
         """
+        if self.wtype_available:
+            self._run_wtype(text)
+            return
+
         # Escape single quotes for shell safety: ' -> '\''
         escaped = text.replace("'", "'\"'\"'")
         self._run("type", escaped)
@@ -153,6 +182,10 @@ class WaylandInputProvider(InputProvider):
         Args:
             key: Key name (e.g., "Return", "Escape").
         """
+        if self.wtype_available:
+            self._run_wtype("-P", key, "-p", key)
+            return
+
         self._run("key", key)
 
     def hotkey(self, *keys: str) -> None:

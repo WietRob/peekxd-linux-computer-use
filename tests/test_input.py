@@ -249,11 +249,12 @@ class TestWaylandAvailability:
     def test_available_when_ydotool_and_daemon_present(
         self, mock_daemon: MagicMock, mock_exec: MagicMock
     ) -> None:
-        mock_exec.return_value = True
+        mock_exec.side_effect = lambda name: name == "ydotool"
         mock_daemon.return_value = True
         provider = WaylandInputProvider()
         assert provider.available is True
-        mock_exec.assert_called_once_with("ydotool")
+        assert provider.wtype_available is False
+        assert provider.ydotool_available is True
         mock_daemon.assert_called_once()
 
     @patch("peekxd.input.wayland.executable_available")
@@ -271,10 +272,25 @@ class TestWaylandAvailability:
     def test_not_available_when_daemon_missing(
         self, mock_daemon: MagicMock, mock_exec: MagicMock
     ) -> None:
-        mock_exec.return_value = True
+        mock_exec.side_effect = lambda name: name == "ydotool"
         mock_daemon.return_value = False
         provider = WaylandInputProvider()
         assert provider.available is False
+
+    @patch("peekxd.input.wayland.executable_available")
+    @patch("peekxd.input.wayland._ydotoold_running")
+    def test_available_when_wtype_present_without_ydotoold(
+        self, mock_daemon: MagicMock, mock_exec: MagicMock
+    ) -> None:
+        """wtype alone should make text/key Wayland input available."""
+        mock_exec.side_effect = lambda name: name == "wtype"
+        mock_daemon.return_value = False
+        provider = WaylandInputProvider()
+
+        assert provider.available is True
+        assert provider.wtype_available is True
+        assert provider.ydotool_available is False
+        mock_daemon.assert_not_called()
 
     @patch("peekxd.input.wayland.Path.exists")
     def test_ydotoold_running_checks_socket_paths(self, mock_exists: MagicMock) -> None:
@@ -381,7 +397,7 @@ class TestWaylandCommands:
     @patch("peekxd.input.wayland.run_command")
     @patch("peekxd.input.wayland.executable_available")
     def test_type_text(self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock) -> None:
-        mock_avail.return_value = True
+        mock_avail.side_effect = lambda name: name == "ydotool"
         mock_daemon.return_value = True
         provider = WaylandInputProvider()
         provider.type_text("hello")
@@ -390,8 +406,50 @@ class TestWaylandCommands:
     @patch("peekxd.input.wayland._ydotoold_running")
     @patch("peekxd.input.wayland.run_command")
     @patch("peekxd.input.wayland.executable_available")
+    def test_type_text_prefers_wtype_when_available(
+        self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock
+    ) -> None:
+        mock_avail.side_effect = lambda name: name in {"ydotool", "wtype"}
+        mock_daemon.return_value = True
+        provider = WaylandInputProvider()
+
+        provider.type_text("hello")
+
+        mock_run.assert_called_once_with(["wtype", "hello"])
+
+    @patch("peekxd.input.wayland._ydotoold_running")
+    @patch("peekxd.input.wayland.run_command")
+    @patch("peekxd.input.wayland.executable_available")
+    def test_key_press_prefers_wtype_when_available(
+        self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock
+    ) -> None:
+        mock_avail.side_effect = lambda name: name in {"ydotool", "wtype"}
+        mock_daemon.return_value = True
+        provider = WaylandInputProvider()
+
+        provider.key_press("Return")
+
+        mock_run.assert_called_once_with(["wtype", "-P", "Return", "-p", "Return"])
+
+    @patch("peekxd.input.wayland._ydotoold_running")
+    @patch("peekxd.input.wayland.run_command")
+    @patch("peekxd.input.wayland.executable_available")
+    def test_mouse_commands_keep_using_ydotool_when_wtype_available(
+        self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock
+    ) -> None:
+        mock_avail.side_effect = lambda name: name in {"ydotool", "wtype"}
+        mock_daemon.return_value = True
+        provider = WaylandInputProvider()
+
+        provider.move_mouse(100, 200)
+
+        mock_run.assert_called_once_with(["ydotool", "mousemove", "100", "200"])
+
+    @patch("peekxd.input.wayland._ydotoold_running")
+    @patch("peekxd.input.wayland.run_command")
+    @patch("peekxd.input.wayland.executable_available")
     def test_type_text_with_quotes(self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock) -> None:
-        mock_avail.return_value = True
+        mock_avail.side_effect = lambda name: name == "ydotool"
         mock_daemon.return_value = True
         provider = WaylandInputProvider()
         provider.type_text("it's a test")
@@ -401,7 +459,7 @@ class TestWaylandCommands:
     @patch("peekxd.input.wayland.run_command")
     @patch("peekxd.input.wayland.executable_available")
     def test_key_press(self, mock_avail: MagicMock, mock_run: MagicMock, mock_daemon: MagicMock) -> None:
-        mock_avail.return_value = True
+        mock_avail.side_effect = lambda name: name == "ydotool"
         mock_daemon.return_value = True
         provider = WaylandInputProvider()
         provider.key_press("Return")

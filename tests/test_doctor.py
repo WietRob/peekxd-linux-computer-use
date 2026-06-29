@@ -39,6 +39,16 @@ def test_input_missing_blocked_without_crash():
     assert "xdotool" in check.fix_hint
 
 
+def test_input_doctor_reports_wtype_availability():
+    with patch("peekxd.core.doctor.get_input_provider", return_value=SimpleNamespace(permission_label="wtype")), \
+         patch("peekxd.core.doctor.executable_available", side_effect=lambda name: name == "wtype"):
+        check = run_doctor(capability="input").checks[0]
+
+    assert check.status == CapabilityStatus.OK
+    assert check.evidence["tools"]["wtype"] is True
+    assert check.evidence["tools"]["ydotool"] is False
+
+
 def test_one_provider_exception_does_not_stop_all_checks():
     with patch("peekxd.core.doctor.get_input_provider", return_value=SimpleNamespace(permission_label="xdotool")):
         result = run_doctor(capabilities=["screenshot", "input"])
