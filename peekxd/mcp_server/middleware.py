@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, Optional
 
 from ..core.audit import AuditLogger, get_logger
 from ..core.safety import SafetyGuard, SafetyLevel
+from ..core.shadow import ShadowRecorder
 from ..core.zones import RiskDecision, Zone
 
 
@@ -17,9 +18,11 @@ class SafetyMiddleware:
         self,
         safety_guard: Optional[SafetyGuard] = None,
         audit_logger: Optional[AuditLogger] = None,
+        shadow_recorder: Optional[ShadowRecorder] = None,
     ) -> None:
         self.safety_guard = safety_guard or SafetyGuard(SafetyLevel.NORMAL)
         self.audit_logger = audit_logger or get_logger()
+        self.shadow_recorder = shadow_recorder or ShadowRecorder()
 
     def wrap_tool(
         self,
@@ -37,7 +40,16 @@ class SafetyMiddleware:
                 return self._blocked_response(tool_name, params, decision)
 
             try:
-                raw_result = func(*args, **kwargs)
+                if decision.zone == Zone.SHADOW:
+                    raw_result, shadow_result = self.shadow_recorder.wrap(
+                        action_callable=lambda: func(*args, **kwargs),
+                        action=tool_name,
+                        params=params,
+                        screen_state=None,
+                    )
+                else:
+                    raw_result = func(*args, **kwargs)
+                    shadow_result = None
             except Exception as exc:
                 self.audit_logger.log_action(
                     tool_name,
@@ -50,6 +62,8 @@ class SafetyMiddleware:
                 raise
 
             result = self._envelope_result(raw_result)
+            if shadow_result is not None:
+                result["shadow"] = shadow_result.to_dict()
             entry = self.audit_logger.log_action(
                 tool_name,
                 params,
