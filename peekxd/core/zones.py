@@ -121,25 +121,39 @@ class ZoneDecision:
     # Actions that are read-only / observational and do not capture pixels.
     _READONLY_ACTIONS = {
         "list_windows",
-        "find_element", "inspect_ui", "get_ui_tree", "get_active_window", "see_semantic",
+        "find_element",
+        "inspect_ui",
+        "get_ui_tree",
+        "get_active_window",
+        "see_semantic",
+        "peekxd_ghost_preview",
+        "peekxd_audit_export",
+        "peekxd_zone_check",
     }
 
     # Removed pixel-capture/vision actions. These must never be classified as
     # DIRECT just because they used to be observational.
     _REMOVED_SCREENSHOT_ACTIONS = {
-        "capture_screen", "mark_elements", "screenshot", "analyze_screen", "analyze_image",
-        "find_and_click", "type_into_field", "screen_has_changed",
+        "capture_screen",
+        "mark_elements",
+        "screenshot",
+        "analyze_screen",
+        "analyze_image",
+        "find_and_click",
+        "type_into_field",
+        "screen_has_changed",
     }
 
     # Actions that execute with before/after snapshot (Shadow Mode V2)
     _SHADOW_ACTIONS = {
-        "click",
+        "click", "drag",
     }
 
     # Actions that modify state but are generally low-risk
     _LOW_RISK_ACTIONS = {
-        "move_mouse", "scroll", "wait",
-        "focus_window", "key", "hotkey",
+        "move_mouse", "scroll", "wait", "wait_for_element", "wait_for_text",
+        "focus_window", "key", "press_key", "hotkey",
+        "peekxd_set_safety_level",
     }
 
     # Actions that modify data
@@ -178,14 +192,19 @@ class ZoneDecision:
                 zone=Zone.GHOST,
                 risk_level="blocked",
                 risk_factors=[f"removed_screenshot_action: {action}"],
-                reason="Pixel/screenshot capture actions were removed; use semantic state instead",
+                reason=(
+                    "Pixel/screenshot capture actions were removed; "
+                    "use semantic state instead"
+                ),
             )
 
         # 1. Check for destructive patterns in text (highest priority)
         text = params.get("text", "")
         if isinstance(text, str):
             for pattern in cls._DESTRUCTIVE_PATTERNS:
-                if pattern.lower().strip("*") in text.lower() or fnmatch.fnmatch(text.lower(), pattern.lower()):
+                if pattern.lower().strip("*") in text.lower() or fnmatch.fnmatch(
+                    text.lower(), pattern.lower()
+                ):
                     risk_factors.append(f"destructive_pattern: '{pattern}'")
 
         # 2. Check for credential-like text
@@ -214,7 +233,13 @@ class ZoneDecision:
                     risk_factors.append(f"protected_path: {p}")
 
         # 5. Check for unknown actions
-        known_actions = cls._READONLY_ACTIONS | cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS | cls._REMOVED_SCREENSHOT_ACTIONS
+        known_actions = (
+            cls._READONLY_ACTIONS
+            | cls._SHADOW_ACTIONS
+            | cls._LOW_RISK_ACTIONS
+            | cls._MODIFYING_ACTIONS
+            | cls._REMOVED_SCREENSHOT_ACTIONS
+        )
         if action not in known_actions:
             risk_factors.append(f"unknown_action: {action}")
 
@@ -224,12 +249,16 @@ class ZoneDecision:
             # Any risk factor -> GHOST (conservative)
             return RiskDecision(
                 zone=Zone.GHOST,
-                risk_level="destructive" if any("destructive" in f for f in risk_factors) else "warn",
+                risk_level=(
+                    "destructive"
+                    if any("destructive" in f for f in risk_factors)
+                    else "warn"
+                ),
                 risk_factors=risk_factors,
                 reason=f"Risk factors detected: {', '.join(risk_factors)}",
             )
 
-        # 6. Read-only / observational actions -> DIRECT (fast path, only if no risk factors)
+        # 6. Read-only / observational actions -> DIRECT.
         if action in cls._READONLY_ACTIONS:
             return RiskDecision(
                 zone=Zone.DIRECT,
@@ -356,7 +385,7 @@ class ZoneDecision:
                 approval_required=True,
             )
 
-        # Any risk factors -> hard-blocked (destructive, credential, protected path, system keys)
+        # Any risk factors -> hard-blocked.
         if risk_factors:
             return GhostApprovalDecision(
                 classification=GhostActionClassification.HARD_BLOCKED_GHOST,
@@ -366,7 +395,9 @@ class ZoneDecision:
             )
 
         # Unknown actions -> hard-blocked
-        approvable_actions = cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS
+        approvable_actions = (
+            cls._SHADOW_ACTIONS | cls._LOW_RISK_ACTIONS | cls._MODIFYING_ACTIONS
+        )
         if action.strip().lower() not in approvable_actions:
             return GhostApprovalDecision(
                 classification=GhostActionClassification.HARD_BLOCKED_GHOST,
@@ -426,7 +457,10 @@ class ZoneDecision:
         # Label
         label = f"[GHOST] {action} would happen here"
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+            font = ImageFont.truetype(
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                14,
+            )
         except (OSError, IOError):
             font = ImageFont.load_default()
 
@@ -438,7 +472,10 @@ class ZoneDecision:
 
         if output_path is None:
             import tempfile
-            output_path = os.path.join(tempfile.gettempdir(), f"ghost_preview_{action}_{int(time.time())}.png")
+            output_path = os.path.join(
+                tempfile.gettempdir(),
+                f"ghost_preview_{action}_{int(time.time())}.png",
+            )
 
         img.save(output_path)
         return output_path

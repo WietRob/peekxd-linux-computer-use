@@ -1,7 +1,5 @@
 """Tests for the MCP server."""
 
-import json
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -55,6 +53,7 @@ class TestMCPServer:
             "see_semantic",
             "move_mouse",
             "click",
+            "drag",
             "type_text",
             "scroll",
             "press_key",
@@ -63,23 +62,45 @@ class TestMCPServer:
             "get_ui_tree",
             "find_element",
             "get_active_window",
+            "wait_for_element",
+            "wait_for_text",
+            "peekxd_set_safety_level",
+            "peekxd_ghost_preview",
+            "peekxd_audit_export",
+            "peekxd_zone_check",
         ]
         for tool_name in expected_tools:
             assert tool_name in tool_names, f"Tool {tool_name} not registered"
-        removed_tools = {"capture_screen", "mark_elements", "find_and_click", "type_into_field", "analyze_image", "screen_has_changed"}
+        removed_tools = {
+            "capture_screen",
+            "mark_elements",
+            "find_and_click",
+            "type_into_field",
+            "analyze_image",
+            "screen_has_changed",
+        }
         assert not removed_tools.intersection(tool_names)
 
     @patch("peekxd.mcp_server.server._get_window")
     @patch("peekxd.mcp_server.server._get_inspection")
-    def test_see_semantic_tool_returns_snapshot_without_screenshot(self, mock_get_inspection, mock_get_window, config):
-        """see_semantic returns the non-visual envelope and has no screenshot dependency."""
+    def test_see_semantic_tool_returns_snapshot_without_screenshot(
+        self,
+        mock_get_inspection,
+        mock_get_window,
+        config,
+    ):
+        """see_semantic returns the non-visual envelope."""
         from peekxd.inspection.base import UIElement
 
         inspection = MagicMock()
-        inspection.get_ui_tree.return_value = [UIElement("raw", "Search", "button", (1, 2), (3, 4), None, [], {})]
+        inspection.get_ui_tree.return_value = [
+            UIElement("raw", "Search", "button", (1, 2), (3, 4), None, [], {})
+        ]
         mock_get_inspection.return_value = inspection
         window = MagicMock()
-        window.list_windows.return_value = [{"id": "win", "title": "Browser", "class": "firefox"}]
+        window.list_windows.return_value = [
+            {"id": "win", "title": "Browser", "class": "firefox"}
+        ]
         mock_get_window.return_value = window
 
         registered, _ = self._collect_tools(config)
@@ -89,6 +110,8 @@ class TestMCPServer:
         assert result["schema_version"] == "peekxd.see.v1"
         assert result["result"]["ok"] is True
         assert result["snapshot"]["elements"][0]["element_id"] == "W1-B1"
+        assert result["zone"] == "direct"
+        assert result["audit_id"]
 
     @patch("peekxd.mcp_server.server._get_input")
     def test_move_mouse(self, mock_get_input, config):
@@ -102,6 +125,8 @@ class TestMCPServer:
         assert result["success"] is True
         assert result["x"] == 100
         assert result["y"] == 200
+        assert result["zone"] == "direct"
+        assert result["audit_id"]
         mock_provider.move_mouse.assert_called_once_with(100, 200)
 
     @patch("peekxd.mcp_server.server._get_input")
@@ -139,7 +164,11 @@ class TestMCPServer:
         registered, _ = self._collect_tools(config)
         scroll_func = [f for f in registered if f.__name__ == "scroll"][0]
         result = scroll_func(direction="up", amount=5)
-        assert result == {"success": True, "direction": "up", "amount": 5}
+        assert result["success"] is True
+        assert result["direction"] == "up"
+        assert result["amount"] == 5
+        assert result["zone"] == "direct"
+        assert result["audit_id"]
         mock_provider.scroll.assert_called_once_with("up", 5)
 
     @patch("peekxd.mcp_server.server._get_input")
@@ -167,8 +196,35 @@ class TestMCPServer:
         registered, _ = self._collect_tools(config)
         list_windows_func = [f for f in registered if f.__name__ == "list_windows"][0]
         result = list_windows_func()
-        assert len(result) == 1
-        assert result[0]["id"] == "win1"
+        assert result["result"] == [{"id": "win1", "title": "Test Window"}]
+        assert result["zone"] == "direct"
+        assert result["audit_id"]
+
+    def test_safety_tools_registered_and_callable(self, config, tmp_path):
+        """Safety helper tools expose level, preview, audit, and zone checks."""
+        registered, _ = self._collect_tools(config)
+        tools = {f.__name__: f for f in registered}
+
+        level_result = tools["peekxd_set_safety_level"]("strict")
+        assert level_result["success"] is True
+        assert level_result["safety_level"] == "strict"
+        assert level_result["audit_id"]
+
+        preview_result = tools["peekxd_ghost_preview"](
+            "type_text",
+            {"text": "rm -rf /"},
+        )
+        assert preview_result["preview"]["zone"] == "ghost"
+        assert preview_result["zone"] == "direct"
+
+        zone_result = tools["peekxd_zone_check"]("type_text", {"text": "rm -rf /"})
+        assert zone_result["decision"]["zone"] == "ghost"
+        assert zone_result["audit_id"]
+
+        export_path = tmp_path / "audit.json"
+        export_result = tools["peekxd_audit_export"](str(export_path))
+        assert export_result["success"] is True
+        assert export_path.exists()
 
     @patch("peekxd.mcp_server.server._get_window")
     def test_focus_window(self, mock_get_window, config):
