@@ -158,16 +158,68 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         return _get_window().get_active_window()
 
     @safety_tool
-    def wait_for_element(description: str, timeout: float = 10.0) -> Dict[str, Any]:
+    def wait_for_element(
+        description: str,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+        app_name: Optional[str] = None,
+        window_id: Optional[str] = None,
+        cache_policy: str = "prefer_live",
+        ttl_seconds: int = 30,
+        max_elements: int = 60,
+    ) -> Dict[str, Any]:
         """Wait for an accessible element to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
-        return WaitCondition.for_element(description, timeout)
+
+        return WaitCondition.for_semantic_element(
+            description,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            snapshot_builder=lambda **kwargs: build_semantic_snapshot(
+                **kwargs,
+                visual=False,
+                visual_once=False,
+                inspection_provider=_get_inspection(),
+                window_provider=_get_window(),
+            ),
+            app=app_name,
+            window_id=window_id,
+            cache_policy=cache_policy,
+            ttl_seconds=ttl_seconds,
+            max_elements=max_elements,
+        )
 
     @safety_tool
-    def wait_for_text(text: str, timeout: float = 10.0) -> Dict[str, Any]:
+    def wait_for_text(
+        text: str,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+        app_name: Optional[str] = None,
+        window_id: Optional[str] = None,
+        cache_policy: str = "prefer_live",
+        ttl_seconds: int = 30,
+        max_elements: int = 60,
+    ) -> Dict[str, Any]:
         """Wait for accessible text to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
-        return WaitCondition.for_text(text, timeout)
+
+        return WaitCondition.for_semantic_text(
+            text,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            snapshot_builder=lambda **kwargs: build_semantic_snapshot(
+                **kwargs,
+                visual=False,
+                visual_once=False,
+                inspection_provider=_get_inspection(),
+                window_provider=_get_window(),
+            ),
+            app=app_name,
+            window_id=window_id,
+            cache_policy=cache_policy,
+            ttl_seconds=ttl_seconds,
+            max_elements=max_elements,
+        )
 
     @safety_tool
     def peekxd_set_safety_level(level: str) -> Dict[str, Any]:

@@ -385,6 +385,133 @@ class WaitCondition:
     """Wait for specific conditions on screen."""
 
     @staticmethod
+    def _snapshot_metadata(snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """Return deterministic metadata for the last observed semantic snapshot."""
+        payload = dict(snapshot.get("snapshot") or {})
+        return {
+            "snapshot_id": payload.get("snapshot_id"),
+            "created_at": payload.get("created_at"),
+            "ttl_seconds": payload.get("ttl_seconds"),
+            "cache_ttl_remaining_seconds": payload.get("cache_ttl_remaining_seconds"),
+            "cached": payload.get("cached"),
+            "source": dict(payload.get("source") or {}),
+            "meta": dict(snapshot.get("meta") or {}),
+            "result": dict(snapshot.get("result") or {}),
+        }
+
+    @staticmethod
+    def _matching_element(
+        snapshot: Dict[str, Any],
+        query: str,
+        *,
+        text_only: bool = False,
+    ) -> Optional[Dict[str, Any]]:
+        query_l = str(query).casefold()
+        for element in snapshot.get("snapshot", {}).get("elements", []) or []:
+            fields = [element.get("name"), element.get("label")]
+            if not text_only:
+                fields.extend(
+                    [
+                        element.get("element_id"),
+                        element.get("raw_element_id"),
+                        element.get("role"),
+                        element.get("path"),
+                    ]
+                )
+            if any(query_l in str(field or "").casefold() for field in fields):
+                return dict(element)
+        return None
+
+    @staticmethod
+    def for_semantic_query(
+        query: str,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+        *,
+        text_only: bool = False,
+        snapshot_builder: Any = None,
+        sleeper: Any = time.sleep,
+        monotonic: Any = time.monotonic,
+        **snapshot_kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Poll semantic snapshots until an element or text query is observed."""
+        if snapshot_builder is None:
+            from ..semantic import build_semantic_snapshot
+
+            snapshot_builder = build_semantic_snapshot
+        if timeout < 0:
+            raise ValueError("timeout must be greater than or equal to zero")
+        if poll_interval < 0:
+            raise ValueError("poll_interval must be greater than or equal to zero")
+
+        started = monotonic()
+        deadline = started + float(timeout)
+        snapshots_observed = 0
+        last_snapshot: Optional[Dict[str, Any]] = None
+
+        while True:
+            snapshot = snapshot_builder(**snapshot_kwargs)
+            snapshots_observed += 1
+            last_snapshot = snapshot
+            matched = WaitCondition._matching_element(snapshot, query, text_only=text_only)
+            if matched is not None:
+                return {
+                    "success": True,
+                    "found": True,
+                    "query": query,
+                    "matched_element": matched,
+                    "snapshots_observed": snapshots_observed,
+                    "elapsed": round(monotonic() - started, 2),
+                    "last_snapshot": WaitCondition._snapshot_metadata(snapshot),
+                }
+
+            if monotonic() >= deadline:
+                return {
+                    "success": False,
+                    "found": False,
+                    "query": query,
+                    "matched_element": None,
+                    "snapshots_observed": snapshots_observed,
+                    "elapsed": round(monotonic() - started, 2),
+                    "last_snapshot": WaitCondition._snapshot_metadata(last_snapshot or {}),
+                    "error": f"timed out waiting for semantic query: {query}",
+                }
+            if poll_interval:
+                sleeper(poll_interval)
+
+    @staticmethod
+    def for_semantic_element(
+        description: str,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Wait for an accessible semantic element to appear."""
+        return WaitCondition.for_semantic_query(
+            description,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            text_only=False,
+            **kwargs,
+        )
+
+    @staticmethod
+    def for_semantic_text(
+        text: str,
+        timeout: float = 10.0,
+        poll_interval: float = 0.5,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        """Wait for accessible text to appear in semantic element labels/names."""
+        return WaitCondition.for_semantic_query(
+            text,
+            timeout=timeout,
+            poll_interval=poll_interval,
+            text_only=True,
+            **kwargs,
+        )
+
+    @staticmethod
     def for_element(
         description: str,
         timeout: float = 10.0,
