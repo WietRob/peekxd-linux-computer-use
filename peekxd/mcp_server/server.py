@@ -16,6 +16,7 @@ except ImportError:
 from ..config import ConfigManager
 from ..core.audit import get_logger
 from ..core.safety import SafetyGuard, SafetyLevel
+from ..core.shadow import ShadowRecorder
 from ..core.zones import ZoneDecision
 from ..semantic import build_semantic_snapshot
 from .middleware import SafetyMiddleware
@@ -62,7 +63,11 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     except ValueError:
         guard = SafetyGuard(SafetyLevel.NORMAL)
     audit_logger = get_logger()
-    middleware = SafetyMiddleware(safety_guard=guard, audit_logger=audit_logger)
+    middleware = SafetyMiddleware(
+        safety_guard=guard,
+        audit_logger=audit_logger,
+        shadow_recorder=ShadowRecorder(),
+    )
 
     def safety_tool(func: Callable[..., Any]) -> Callable[..., Any]:
         if os.environ.get("PEEKXD_SAFETY_MCP") == "0":
