@@ -5,7 +5,8 @@ registered because visible capture can disturb the user's live desktop on
 GNOME/Wayland portal systems.
 """
 
-from typing import Any, Dict, List, Optional
+import os
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     from fastmcp import FastMCP
@@ -13,7 +14,11 @@ except ImportError:
     FastMCP = None
 
 from ..config import ConfigManager
+from ..core.audit import get_logger
+from ..core.safety import SafetyGuard, SafetyLevel
+from ..core.zones import ZoneDecision
 from ..semantic import build_semantic_snapshot
+from .middleware import SafetyMiddleware
 
 _input = None
 _inspection = None
@@ -49,9 +54,22 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     if FastMCP is None:
         raise ImportError("fastmcp not installed. Run: pip install fastmcp")
 
+    config = config or ConfigManager()
     mcp = FastMCP("peekxd-linux")
+    safety_level = config.get("mcp.safety_level", "normal")
+    try:
+        guard = SafetyGuard(SafetyLevel(str(safety_level).lower()))
+    except ValueError:
+        guard = SafetyGuard(SafetyLevel.NORMAL)
+    audit_logger = get_logger()
+    middleware = SafetyMiddleware(safety_guard=guard, audit_logger=audit_logger)
 
-    @mcp.tool()
+    def safety_tool(func: Callable[..., Any]) -> Callable[..., Any]:
+        if os.environ.get("PEEKXD_SAFETY_MCP") == "0":
+            return mcp.tool()(func)
+        return mcp.tool()(middleware.wrap_tool(func.__name__, func))
+
+    @safety_tool
     def see_semantic(
         app_name: Optional[str] = None,
         window_id: Optional[str] = None,
@@ -72,81 +90,117 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
             window_provider=_get_window(),
         )
 
-    @mcp.tool()
+    @safety_tool
     def move_mouse(x: int, y: int) -> Dict[str, Any]:
         """Move mouse to coordinates."""
         _get_input().move_mouse(x, y)
         return {"success": True, "x": x, "y": y}
 
-    @mcp.tool()
+    @safety_tool
     def click(x: int, y: int, button: str = "left") -> Dict[str, Any]:
         """Click at coordinates."""
         _get_input().click(x, y, button)
         return {"success": True, "x": x, "y": y, "button": button}
 
-    @mcp.tool()
+    @safety_tool
     def drag(x1: int, y1: int, x2: int, y2: int) -> Dict[str, Any]:
         """Perform a drag-and-drop operation from (x1,y1) to (x2,y2)."""
         _get_input().drag(x1, y1, x2, y2)
         return {"success": True, "from": {"x": x1, "y": y1}, "to": {"x": x2, "y": y2}}
 
-    @mcp.tool()
+    @safety_tool
     def type_text(text: str) -> Dict[str, Any]:
         """Type text."""
         _get_input().type_text(text)
         return {"success": True, "text": text}
 
-    @mcp.tool()
+    @safety_tool
     def scroll(direction: str = "down", amount: int = 3) -> Dict[str, Any]:
         """Scroll the mouse wheel."""
         _get_input().scroll(direction, amount)
         return {"success": True, "direction": direction, "amount": amount}
 
-    @mcp.tool()
+    @safety_tool
     def press_key(key: str) -> Dict[str, Any]:
         """Press a key."""
         _get_input().key_press(key)
         return {"success": True, "key": key}
 
-    @mcp.tool()
+    @safety_tool
     def list_windows() -> List[Dict[str, Any]]:
         """List all windows."""
         return _get_window().list_windows()
 
-    @mcp.tool()
+    @safety_tool
     def focus_window(window_id: str) -> Dict[str, Any]:
         """Focus a window."""
         _get_window().focus_window(window_id)
         return {"success": True, "window_id": window_id}
 
-    @mcp.tool()
+    @safety_tool
     def get_ui_tree(app_name: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get UI element tree."""
         elements = _get_inspection().get_ui_tree(app_name)
         return [e._asdict() for e in elements]
 
-    @mcp.tool()
-    def find_element(name: Optional[str] = None, role: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    @safety_tool
+    def find_element(
+        name: Optional[str] = None,
+        role: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Find a UI element by name or role."""
         elem = _get_inspection().find_element(name=name, role=role)
         return elem._asdict() if elem else None
 
-    @mcp.tool()
+    @safety_tool
     def get_active_window() -> Optional[Dict[str, Any]]:
         """Get the currently focused window."""
         return _get_window().get_active_window()
 
-    @mcp.tool()
+    @safety_tool
     def wait_for_element(description: str, timeout: float = 10.0) -> Dict[str, Any]:
         """Wait for an accessible element to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
         return WaitCondition.for_element(description, timeout)
 
-    @mcp.tool()
+    @safety_tool
     def wait_for_text(text: str, timeout: float = 10.0) -> Dict[str, Any]:
         """Wait for accessible text to appear without screenshot capture."""
         from ..agent.actions import WaitCondition
         return WaitCondition.for_text(text, timeout)
+
+    @safety_tool
+    def peekxd_set_safety_level(level: str) -> Dict[str, Any]:
+        """Set the MCP SafetyGuard level for subsequent tool calls."""
+        normalized = str(level).lower()
+        try:
+            middleware.safety_guard.level = SafetyLevel(normalized)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Unknown safety level: {level}",
+                "allowed_levels": [item.value for item in SafetyLevel],
+            }
+        return {"success": True, "safety_level": middleware.safety_guard.level.value}
+
+    @safety_tool
+    def peekxd_ghost_preview(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return a structured GHOST preview for an action without executing it."""
+        decision = middleware.safety_guard.check_zone(action, params)
+        preview = ZoneDecision.create_ghost_preview(action, params, decision)
+        return {"preview": preview.to_dict(), "decision": decision.to_dict()}
+
+    @safety_tool
+    def peekxd_audit_export(path: Optional[str] = None) -> Dict[str, Any]:
+        """Export the current MCP audit log to JSON."""
+        export_path = middleware.audit_logger.export_json(path)
+        return {"success": True, "path": export_path}
+
+    @safety_tool
+    def peekxd_zone_check(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return the SafetyGuard zone decision for an action without executing it."""
+        decision = middleware.safety_guard.check_zone(action, params)
+        return {"decision": decision.to_dict()}
 
     return mcp
 
