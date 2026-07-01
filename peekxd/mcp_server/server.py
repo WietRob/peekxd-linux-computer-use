@@ -5,6 +5,7 @@ registered because visible capture can disturb the user's live desktop on
 GNOME/Wayland portal systems.
 """
 
+import logging
 import os
 from typing import Any, Callable, Dict, List, Optional
 
@@ -24,6 +25,10 @@ from .middleware import SafetyMiddleware
 _input = None
 _inspection = None
 _window = None
+logger = logging.getLogger(__name__)
+
+
+_TRUSTED_BOOTSTRAP_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
 
 
 def _get_input():
@@ -50,6 +55,38 @@ def _get_window():
     return _window
 
 
+def _is_truthy(value: Any) -> bool:
+    """Return True for explicit truthy config/env values."""
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_trusted_local_bootstrap(config: ConfigManager) -> bool:
+    """Return whether config explicitly allows trusted local MCP bootstrap."""
+    if not _is_truthy(config.get("mcp.trusted_bootstrap", False)):
+        return False
+
+    transport = str(config.get("mcp.transport", "stdio")).strip().lower()
+    if transport == "stdio":
+        return True
+
+    host = str(config.get("mcp.host", "localhost")).strip().lower()
+    return host in _TRUSTED_BOOTSTRAP_HOSTS
+
+
+def _mcp_safety_bypass_enabled(config: ConfigManager) -> bool:
+    """Gate legacy MCP safety bypass to explicit trusted local bootstrap."""
+    if os.environ.get("PEEKXD_SAFETY_MCP") != "0":
+        return False
+    if not _is_trusted_local_bootstrap(config):
+        return False
+
+    logger.warning(
+        "Trusted local MCP bootstrap safety bypass is active; "
+        "only use this for local operator-controlled startup."
+    )
+    return True
+
+
 def create_mcp_server(config: Optional[ConfigManager] = None):
     """Create and configure the FastMCP server."""
     if FastMCP is None:
@@ -68,9 +105,10 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         audit_logger=audit_logger,
         shadow_recorder=ShadowRecorder(),
     )
+    bypass_safety = _mcp_safety_bypass_enabled(config)
 
     def safety_tool(func: Callable[..., Any]) -> Callable[..., Any]:
-        if os.environ.get("PEEKXD_SAFETY_MCP") == "0":
+        if bypass_safety:
             return mcp.tool()(func)
         return mcp.tool()(middleware.wrap_tool(func.__name__, func))
 
