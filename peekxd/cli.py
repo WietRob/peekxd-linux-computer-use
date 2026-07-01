@@ -465,6 +465,8 @@ def mcp(port, transport):
     """Run MCP server."""
     from .mcp_server import create_mcp_server
     config = ConfigManager()
+    config.set("mcp.transport", transport)
+    config.set("mcp.port", port)
     server = create_mcp_server(config)
     if transport == "stdio":
         server.run(transport="stdio", show_banner=False)

@@ -1,5 +1,6 @@
 """JSON-based configuration manager for peekxd Linux."""
 
+import copy
 import json
 import os
 from pathlib import Path
@@ -44,9 +45,9 @@ class ConfigManager:
         """Load config from file or return defaults."""
         if self.config_path.exists():
             with open(self.config_path) as f:
-                self._config = {**DEFAULT_CONFIG, **json.load(f)}
+                self._config = {**copy.deepcopy(DEFAULT_CONFIG), **json.load(f)}
         else:
-            self._config = DEFAULT_CONFIG.copy()
+            self._config = copy.deepcopy(DEFAULT_CONFIG)
         return self._config
 
     def save(self) -> None:
@@ -79,7 +80,7 @@ class ConfigManager:
     def init(self) -> None:
         """Create default config file if it doesn't exist."""
         if not self.config_path.exists():
-            self._config = DEFAULT_CONFIG.copy()
+            self._config = copy.deepcopy(DEFAULT_CONFIG)
             self.save()
 
     def show(self) -> str:

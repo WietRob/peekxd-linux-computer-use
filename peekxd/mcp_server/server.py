@@ -28,7 +28,9 @@ _window = None
 logger = logging.getLogger(__name__)
 
 
-_TRUSTED_BOOTSTRAP_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
+_MCP_SAFETY_BYPASS_ENV = "PEEKXD_SAFETY_MCP"
+_MCP_SAFETY_BYPASS_ALLOWLIST_VALUE = "1"
+_TRUSTED_BOOTSTRAP_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _get_input():
@@ -60,31 +62,69 @@ def _is_truthy(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _mcp_transport(config: ConfigManager) -> str:
+    """Return the normalized configured MCP transport."""
+    return str(config.get("mcp.transport", "stdio")).strip().lower()
+
+
+def _mcp_host(config: ConfigManager) -> str:
+    """Return the normalized configured MCP host."""
+    return str(config.get("mcp.host", "localhost")).strip().lower()
+
+
 def _is_trusted_local_bootstrap(config: ConfigManager) -> bool:
     """Return whether config explicitly allows trusted local MCP bootstrap."""
     if not _is_truthy(config.get("mcp.trusted_bootstrap", False)):
         return False
 
-    transport = str(config.get("mcp.transport", "stdio")).strip().lower()
+    transport = _mcp_transport(config)
     if transport == "stdio":
         return True
 
-    host = str(config.get("mcp.host", "localhost")).strip().lower()
+    host = _mcp_host(config)
     return host in _TRUSTED_BOOTSTRAP_HOSTS
 
 
-def _mcp_safety_bypass_enabled(config: ConfigManager) -> bool:
-    """Gate legacy MCP safety bypass to explicit trusted local bootstrap."""
-    if os.environ.get("PEEKXD_SAFETY_MCP") != "0":
-        return False
-    if not _is_trusted_local_bootstrap(config):
-        return False
+def _mcp_safety_bypass_policy(config: ConfigManager) -> Dict[str, Any]:
+    """Resolve the MCP safety bypass startup policy from config and env."""
+    env_value = os.environ.get(_MCP_SAFETY_BYPASS_ENV)
+    trusted_bootstrap = _is_trusted_local_bootstrap(config)
+    enabled = env_value == _MCP_SAFETY_BYPASS_ALLOWLIST_VALUE and trusted_bootstrap
+    if env_value is None:
+        source = "default_disabled"
+        env_state = "absent"
+    elif env_value == _MCP_SAFETY_BYPASS_ALLOWLIST_VALUE:
+        source = f"env:{_MCP_SAFETY_BYPASS_ENV}=1"
+        env_state = "allowlisted"
+        if not trusted_bootstrap:
+            source = f"{source};trusted_bootstrap=false"
+    else:
+        source = f"env:{_MCP_SAFETY_BYPASS_ENV}:not_allowlisted"
+        env_state = "not_allowlisted"
 
-    logger.warning(
-        "Trusted local MCP bootstrap safety bypass is active; "
-        "only use this for local operator-controlled startup."
+    policy = {
+        "safety_bypass_enabled": enabled,
+        "safety_bypass_source": source,
+        "safety_bypass_env_state": env_state,
+        "trusted_bootstrap": trusted_bootstrap,
+        "transport": _mcp_transport(config),
+        "host": _mcp_host(config),
+    }
+    logger.info(
+        "MCP startup policy evidence: safety_bypass_enabled=%s "
+        "safety_bypass_source=%s trusted_bootstrap=%s transport=%s host=%s",
+        policy["safety_bypass_enabled"],
+        policy["safety_bypass_source"],
+        policy["trusted_bootstrap"],
+        policy["transport"],
+        policy["host"],
     )
-    return True
+    if enabled:
+        logger.warning(
+            "Trusted local MCP bootstrap safety bypass is active; "
+            "only use this for local operator-controlled startup."
+        )
+    return policy
 
 
 def create_mcp_server(config: Optional[ConfigManager] = None):
@@ -105,7 +145,9 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         audit_logger=audit_logger,
         shadow_recorder=ShadowRecorder(),
     )
-    bypass_safety = _mcp_safety_bypass_enabled(config)
+    bypass_policy = _mcp_safety_bypass_policy(config)
+    audit_logger.log_action("mcp_startup_policy", bypass_policy, {"success": True})
+    bypass_safety = bypass_policy["safety_bypass_enabled"]
 
     def safety_tool(func: Callable[..., Any]) -> Callable[..., Any]:
         if bypass_safety:

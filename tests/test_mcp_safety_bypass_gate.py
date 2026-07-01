@@ -1,6 +1,5 @@
-"""Tests for MCP safety bypass scoping."""
+"""Tests for explicit MCP safety bypass allowlist policy."""
 
-import logging
 from unittest.mock import MagicMock, patch
 
 from peekxd.config import ConfigManager
@@ -21,13 +20,12 @@ def _collect_tools(config):
     return {func.__name__: func for func in registered}
 
 
-def test_env_safety_bypass_does_not_disable_middleware_without_trusted_bootstrap(
-    monkeypatch,
-    tmp_path,
-):
-    """PEEKXD_SAFETY_MCP=0 alone must not globally bypass MCP SafetyMiddleware."""
-    monkeypatch.setenv("PEEKXD_SAFETY_MCP", "0")
+def test_safety_bypass_disabled_without_explicit_allowlist_env(monkeypatch, tmp_path):
+    """Trusted bootstrap config alone must not bypass MCP SafetyMiddleware."""
+    monkeypatch.delenv("PEEKXD_SAFETY_MCP", raising=False)
     config = ConfigManager(str(tmp_path / "config.json"))
+    config.set("mcp.trusted_bootstrap", True)
+    config.set("mcp.transport", "stdio")
     provider = MagicMock()
 
     with patch("peekxd.mcp_server.server._get_input", return_value=provider):
@@ -41,35 +39,28 @@ def test_env_safety_bypass_does_not_disable_middleware_without_trusted_bootstrap
     assert result["audit_id"]
 
 
-def test_trusted_local_bootstrap_bypass_requires_explicit_config_and_warns(
-    monkeypatch,
-    tmp_path,
-    caplog,
-):
-    """Only an explicit trusted local bootstrap context may activate bypass mode."""
+def test_safety_bypass_requires_allowlist_env_value_one(monkeypatch, tmp_path):
+    """PEEKXD_SAFETY_MCP=1 is the explicit allowlist value for legacy bypass."""
     monkeypatch.setenv("PEEKXD_SAFETY_MCP", "1")
     config = ConfigManager(str(tmp_path / "config.json"))
     config.set("mcp.trusted_bootstrap", True)
     config.set("mcp.transport", "stdio")
     provider = MagicMock()
 
-    with caplog.at_level(logging.WARNING, logger="peekxd.mcp_server.server"):
-        with patch("peekxd.mcp_server.server._get_input", return_value=provider):
-            tools = _collect_tools(config)
-            result = tools["type_text"](text="rm -rf /tmp/peekxd")
+    with patch("peekxd.mcp_server.server._get_input", return_value=provider):
+        tools = _collect_tools(config)
+        result = tools["type_text"](text="rm -rf /tmp/peekxd")
 
     provider.type_text.assert_called_once_with("rm -rf /tmp/peekxd")
     assert result == {"success": True, "text": "rm -rf /tmp/peekxd"}
-    assert "Trusted local MCP bootstrap safety bypass is active" in caplog.text
 
 
-def test_trusted_bootstrap_bypass_rejects_nonlocal_sse_transport(monkeypatch, tmp_path):
-    """Explicit trust is insufficient when the configured MCP transport is remote SSE."""
-    monkeypatch.setenv("PEEKXD_SAFETY_MCP", "1")
+def test_safety_bypass_rejects_legacy_zero_value(monkeypatch, tmp_path):
+    """Legacy PEEKXD_SAFETY_MCP=0 must no longer enable bypass accidentally."""
+    monkeypatch.setenv("PEEKXD_SAFETY_MCP", "0")
     config = ConfigManager(str(tmp_path / "config.json"))
     config.set("mcp.trusted_bootstrap", True)
-    config.set("mcp.transport", "sse")
-    config.set("mcp.host", "0.0.0.0")
+    config.set("mcp.transport", "stdio")
     provider = MagicMock()
 
     with patch("peekxd.mcp_server.server._get_input", return_value=provider):
