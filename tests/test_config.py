@@ -77,6 +77,17 @@ class TestConfigManager:
             cm.set("screenshot.format", "webp")
             assert cm.get("screenshot.format") == "webp"
 
+    def test_default_config_instances_do_not_share_nested_state(self):
+        """Mutating one default config instance must not affect another instance."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            first = ConfigManager(str(Path(tmpdir) / "first.json"))
+            second = ConfigManager(str(Path(tmpdir) / "second.json"))
+
+            first.set("mcp.trusted_bootstrap", True)
+
+            assert second.get("mcp.trusted_bootstrap", False) is False
+            assert DEFAULT_CONFIG["mcp"].get("trusted_bootstrap", False) is False
+
     def test_set_nested_key_creates_path(self):
         """set() creates intermediate dicts for nested keys."""
         cm = ConfigManager.__new__(ConfigManager)
