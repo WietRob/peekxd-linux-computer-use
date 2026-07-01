@@ -101,6 +101,23 @@ class TestCLI:
             assert result.exit_code == 0
             assert "jpg" in result.output
 
+    def test_mcp_command_binds_transport_before_server_creation(self, runner):
+        """CLI transport option must be visible to MCP startup safety policy."""
+        mock_server = MagicMock()
+        captured = {}
+
+        def create_server(config):
+            captured["transport"] = config.get("mcp.transport")
+            captured["port"] = config.get("mcp.port")
+            return mock_server
+
+        with patch("peekxd.mcp_server.create_mcp_server", side_effect=create_server):
+            result = runner.invoke(cli, ["mcp", "--transport", "sse", "--port", "4321"])
+
+        assert result.exit_code == 0, result.output
+        assert captured == {"transport": "sse", "port": 4321}
+        mock_server.run.assert_called_once_with(transport="sse", port=4321, show_banner=False)
+
     def test_click_command(self, mock_submodules, runner):
         """click command invokes the input provider."""
         provider = mock_submodules["peekxd.input"]

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 _MCP_SAFETY_BYPASS_ENV = "PEEKXD_SAFETY_MCP"
 _MCP_SAFETY_BYPASS_ALLOWLIST_VALUE = "1"
-_TRUSTED_BOOTSTRAP_HOSTS = {"", "localhost", "127.0.0.1", "::1"}
+_TRUSTED_BOOTSTRAP_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _get_input():
@@ -92,17 +92,20 @@ def _mcp_safety_bypass_policy(config: ConfigManager) -> Dict[str, Any]:
     enabled = env_value == _MCP_SAFETY_BYPASS_ALLOWLIST_VALUE and trusted_bootstrap
     if env_value is None:
         source = "default_disabled"
+        env_state = "absent"
     elif env_value == _MCP_SAFETY_BYPASS_ALLOWLIST_VALUE:
         source = f"env:{_MCP_SAFETY_BYPASS_ENV}=1"
+        env_state = "allowlisted"
         if not trusted_bootstrap:
             source = f"{source};trusted_bootstrap=false"
     else:
-        source = f"env:{_MCP_SAFETY_BYPASS_ENV}={env_value};not_allowlisted"
+        source = f"env:{_MCP_SAFETY_BYPASS_ENV}:not_allowlisted"
+        env_state = "not_allowlisted"
 
     policy = {
         "safety_bypass_enabled": enabled,
         "safety_bypass_source": source,
-        "safety_bypass_env": env_value,
+        "safety_bypass_env_state": env_state,
         "trusted_bootstrap": trusted_bootstrap,
         "transport": _mcp_transport(config),
         "host": _mcp_host(config),
