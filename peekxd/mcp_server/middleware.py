@@ -19,10 +19,15 @@ class SafetyMiddleware:
         safety_guard: Optional[SafetyGuard] = None,
         audit_logger: Optional[AuditLogger] = None,
         shadow_recorder: Optional[ShadowRecorder] = None,
+        capture_fn: Optional[Callable[[str], None]] = None,
+        get_screenshot_path_fn: Optional[Callable[[], str]] = None,
     ) -> None:
         self.safety_guard = safety_guard or SafetyGuard(SafetyLevel.NORMAL)
         self.audit_logger = audit_logger or get_logger()
-        self.shadow_recorder = shadow_recorder or ShadowRecorder()
+        self.shadow_recorder = shadow_recorder or ShadowRecorder(
+            capture_fn=capture_fn,
+            get_screenshot_path_fn=get_screenshot_path_fn,
+        )
 
     def wrap_tool(
         self,
