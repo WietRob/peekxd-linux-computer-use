@@ -146,11 +146,15 @@ def _create_shadow_recorder(config: ConfigManager) -> ShadowRecorder:
     capture_dir = _mcp_shadow_capture_dir(config)
 
     def next_path() -> str:
-        capture_dir.mkdir(parents=True, exist_ok=True)
+        capture_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        capture_dir.chmod(0o700)
         return str(capture_dir / f"shadow-{uuid.uuid4().hex}.png")
 
     def capture(path: str) -> None:
         get_screenshot_provider().capture_screen(path)
+        capture_path = Path(path)
+        if capture_path.exists():
+            capture_path.chmod(0o600)
 
     return ShadowRecorder(capture_fn=capture, get_screenshot_path_fn=next_path)
 
