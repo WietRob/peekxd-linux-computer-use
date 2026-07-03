@@ -1,5 +1,7 @@
 """Tests for MCP shadow recorder screenshot capture hooks."""
 
+import stat
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from peekxd.config import ConfigManager
@@ -57,3 +59,23 @@ def test_mcp_server_shadow_recorder_uses_configured_screenshot_provider(tmp_path
     assert path.startswith(str(tmp_path / "mcp-shadow"))
     assert path.endswith(".png")
     provider.capture_screen.assert_called_once_with(path)
+
+
+def test_mcp_shadow_capture_artifacts_are_owner_private(tmp_path):
+    """Shadow capture directory and screenshot files should be owner-private."""
+    config = ConfigManager(str(tmp_path / "config.json"))
+    provider = MagicMock()
+
+    def write_capture(path):
+        Path(path).write_bytes(b"sensitive screen pixels")
+
+    provider.capture_screen.side_effect = write_capture
+
+    with patch("peekxd.mcp_server.server.get_screenshot_provider", return_value=provider):
+        recorder = _create_shadow_recorder(config)
+        path = recorder._get_path()
+        recorder._capture(path)
+
+    capture_dir = Path(path).parent
+    assert stat.S_IMODE(capture_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(Path(path).stat().st_mode) == 0o600
