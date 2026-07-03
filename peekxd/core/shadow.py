@@ -44,6 +44,7 @@ class ShadowResult:
     changed: Optional[bool] = None
     diff_summary: str = ""
     error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -52,6 +53,7 @@ class ShadowResult:
             "changed": self.changed,
             "diff_summary": self.diff_summary,
             "error": self.error,
+            "metadata": self.metadata,
         }
 
 
@@ -272,5 +274,15 @@ class ShadowRecorder:
             compare_result.error = f"{compare_result.error}; {error}"
         elif error:
             compare_result.error = error
+
+        if before is not None and after is not None:
+            capture_status = "captured"
+        elif error:
+            capture_status = "degraded"
+        else:
+            capture_status = "unavailable"
+        compare_result.metadata = {"capture_status": capture_status}
+        if error:
+            compare_result.metadata["warnings"] = ["shadow_screenshot_capture_failed"]
 
         return action_result, compare_result

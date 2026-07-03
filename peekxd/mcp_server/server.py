@@ -7,6 +7,9 @@ GNOME/Wayland portal systems.
 
 import logging
 import os
+import tempfile
+import uuid
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -19,6 +22,7 @@ from ..core.audit import get_logger
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
 from ..core.zones import ZoneDecision
+from ..screenshot import get_screenshot_provider
 from ..semantic import build_semantic_snapshot
 from .middleware import SafetyMiddleware
 
@@ -127,6 +131,30 @@ def _mcp_safety_bypass_policy(config: ConfigManager) -> Dict[str, Any]:
     return policy
 
 
+def _mcp_shadow_capture_dir(config: ConfigManager) -> Path:
+    """Return the directory used for MCP shadow screenshots."""
+    configured = config.get("mcp.shadow_capture_dir", None)
+    if configured:
+        return Path(str(configured)).expanduser()
+    if config.config_path:
+        return config.config_path.parent / "mcp-shadow"
+    return Path(tempfile.gettempdir()) / "peekxd-mcp-shadow"
+
+
+def _create_shadow_recorder(config: ConfigManager) -> ShadowRecorder:
+    """Create the MCP ShadowRecorder with lazy screenshot capture callbacks."""
+    capture_dir = _mcp_shadow_capture_dir(config)
+
+    def next_path() -> str:
+        capture_dir.mkdir(parents=True, exist_ok=True)
+        return str(capture_dir / f"shadow-{uuid.uuid4().hex}.png")
+
+    def capture(path: str) -> None:
+        get_screenshot_provider().capture_screen(path)
+
+    return ShadowRecorder(capture_fn=capture, get_screenshot_path_fn=next_path)
+
+
 def create_mcp_server(config: Optional[ConfigManager] = None):
     """Create and configure the FastMCP server."""
     if FastMCP is None:
@@ -143,7 +171,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     middleware = SafetyMiddleware(
         safety_guard=guard,
         audit_logger=audit_logger,
-        shadow_recorder=ShadowRecorder(),
+        shadow_recorder=_create_shadow_recorder(config),
     )
     bypass_policy = _mcp_safety_bypass_policy(config)
     audit_logger.log_action("mcp_startup_policy", bypass_policy, {"success": True})
