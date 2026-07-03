@@ -129,3 +129,34 @@ class SafetyMiddleware:
             "risk_factors": decision.risk_factors,
             "audit_id": f"{entry.session_id}:{entry.step}",
         }
+
+
+def install_global_safety_interceptor(mcp: Any, middleware: SafetyMiddleware) -> Any:
+    """Route every subsequent FastMCP tool registration through SafetyMiddleware.
+
+    FastMCP exposes registration as ``mcp.tool()`` decorators. Installing the
+    interceptor once at server bootstrap keeps safety enforcement at that
+    registration boundary, so later tools added to the same server cannot skip
+    SafetyGuard by forgetting to use a local wrapper helper.
+    """
+    if vars(mcp).get("_peekxd_global_safety_interceptor_installed", False):
+        return mcp
+
+    original_tool = mcp.tool
+
+    def intercepted_tool(*tool_args: Any, **tool_kwargs: Any) -> Callable[..., Any]:
+        if len(tool_args) == 1 and callable(tool_args[0]) and not tool_kwargs:
+            func = tool_args[0]
+            return original_tool()(middleware.wrap_tool(func.__name__, func))
+
+        original_decorator = original_tool(*tool_args, **tool_kwargs)
+
+        def register(func: Callable[..., Any]) -> Any:
+            return original_decorator(middleware.wrap_tool(func.__name__, func))
+
+        return register
+
+    setattr(mcp, "_peekxd_original_tool", original_tool)
+    setattr(mcp, "tool", intercepted_tool)
+    setattr(mcp, "_peekxd_global_safety_interceptor_installed", True)
+    return mcp
