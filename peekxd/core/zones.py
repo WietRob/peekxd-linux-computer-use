@@ -52,6 +52,7 @@ class GhostPreviewResult:
             "risk_factors": self.risk_factors,
             "reason": self.reason,
             "requires_confirmation": self.requires_confirmation,
+            "required_confirmation": self.requires_confirmation,
             "target_coordinates": self.target_coordinates,
             "text_preview": self.text_preview,
             "markup_path": self.markup_path,

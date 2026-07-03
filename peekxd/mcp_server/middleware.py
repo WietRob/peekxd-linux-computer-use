@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Optional
 from ..core.audit import AuditLogger, get_logger
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
-from ..core.zones import RiskDecision, Zone
+from ..core.zones import RiskDecision, Zone, ZoneDecision
 
 
 class SafetyMiddleware:
@@ -94,6 +94,12 @@ class SafetyMiddleware:
             "error": error,
             "risk_factors": decision.risk_factors,
         }
+        if decision.zone == Zone.GHOST:
+            result["ghost_preview"] = ZoneDecision.create_ghost_preview(
+                tool_name,
+                params,
+                decision,
+            ).to_dict()
         entry = self.audit_logger.log_action(
             tool_name,
             params,
