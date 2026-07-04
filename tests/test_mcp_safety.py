@@ -74,3 +74,41 @@ def test_middleware_blocks_ghost_zone_without_calling_tool():
     assert result["audit_id"] == "mcp-test:0"
     assert logger.actions[0].error == result["error"]
     assert logger.actions[0].result["executed"] is False
+
+
+def test_check_action_strict_mode_blocks_destructive_pattern():
+    """Middleware must call check_action() after check_zone().
+
+    When check_zone() returns a non-GHOST zone (e.g., DIRECT) but check_action()
+    raises PermissionDeniedError (STRICT mode destructive detection), the
+    middleware must catch the exception and return an MCP error response without
+    calling the underlying tool.
+
+    Uses a mock guard where check_zone() passes (DIRECT zone) but check_action()
+    raises PermissionDeniedError, proving the middleware calls both safety
+    methods independently and handles the check_action() error path.
+    """
+    from peekxd.core.safety import PermissionDeniedError
+
+    guard = MagicMock()
+    guard.check_zone.return_value = RiskDecision(
+        zone=Zone.DIRECT,
+        risk_level="safe",
+        reason="No risk factors — zone allows execution",
+    )
+    guard.check_action.side_effect = PermissionDeniedError(
+        "[PREVIEW BLOCKED] type_text: destructive command detected"
+    )
+    logger = AuditLogger(session_id="mcp-test")
+    tool = MagicMock(return_value={"success": True})
+    middleware = SafetyMiddleware(safety_guard=guard, audit_logger=logger)
+
+    wrapped = middleware.wrap_tool("type_text", tool)
+    result = wrapped(text="rm -rf /home")
+
+    guard.check_zone.assert_called_once_with("type_text", {"text": "rm -rf /home"})
+    guard.check_action.assert_called_once_with("type_text", {"text": "rm -rf /home"})
+    tool.assert_not_called()
+    assert result["success"] is False
+    assert result["blocked"] is True
+    assert "destructive" in result["error"].lower()
