@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 from ..core.audit import AuditLogger, get_logger
 from ..core.errors import PermissionDeniedError
@@ -16,6 +16,7 @@ from ..core.zones import (
     Zone,
     ZoneDecision,
 )
+from ..safety.overlay import build_ghost_overlay_context
 
 
 class SafetyMiddleware:
@@ -28,7 +29,10 @@ class SafetyMiddleware:
         shadow_recorder: Optional[ShadowRecorder] = None,
         capture_fn: Optional[Callable[[str], None]] = None,
         get_screenshot_path_fn: Optional[Callable[[], str]] = None,
-        ghost_overlay: Optional[GhostOverlayController] = None,
+        ghost_overlay: Optional[
+            Union[GhostOverlayController, Callable[[], GhostOverlayController]]
+        ] = None,
+        get_element_context: Optional[Callable[[], List[Dict[str, Any]]]] = None,
     ) -> None:
         self.safety_guard = safety_guard or SafetyGuard(SafetyLevel.NORMAL)
         self.audit_logger = audit_logger or get_logger()
@@ -36,7 +40,37 @@ class SafetyMiddleware:
             capture_fn=capture_fn,
             get_screenshot_path_fn=get_screenshot_path_fn,
         )
-        self.ghost_overlay = ghost_overlay
+        self._raw_overlay = ghost_overlay
+        self._cached_overlay: Optional[GhostOverlayController] = None
+        self.get_element_context = get_element_context
+
+    @property
+    def ghost_overlay(self) -> Optional[GhostOverlayController]:
+        """Return the resolved GhostOverlayController (lazy-construct if factory)."""
+        return self._resolve_overlay()
+
+    def _resolve_overlay(self) -> Optional[GhostOverlayController]:
+        """Resolve the overlay controller: instance, factory call, or None.
+
+        V4: Accepts either a GhostOverlayController instance or a callable
+        that returns one (e.g. OverlayControllerFactory). The callable is
+        called exactly once and the result is cached.
+
+        Uses duck-typing: if the raw value has a ``show_preview`` attribute,
+        it is treated as an instance. Otherwise, if callable, it is treated
+        as a factory.
+        """
+        if self._raw_overlay is None:
+            return None
+        # Duck-type: if it has show_preview, it's an overlay instance
+        if hasattr(self._raw_overlay, "show_preview"):
+            overlay = cast(GhostOverlayController, self._raw_overlay)
+            self._cached_overlay = overlay
+            return overlay
+        # Callable: lazy construct once and cache
+        if self._cached_overlay is None:
+            self._cached_overlay = self._raw_overlay()
+        return self._cached_overlay
 
     def wrap_tool(
         self,
@@ -75,6 +109,10 @@ class SafetyMiddleware:
                     params=params,
                     preview=preview.to_dict(),
                 )
+                # V4: enrich overlay request with snapshot element context
+                if self.get_element_context is not None:
+                    elements = self.get_element_context()
+                    build_ghost_overlay_context(overlay_request, elements)
                 overlay_decision = self.ghost_overlay.show_preview(overlay_request)
 
                 if not overlay_decision.approved:
