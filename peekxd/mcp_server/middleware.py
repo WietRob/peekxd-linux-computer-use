@@ -6,6 +6,7 @@ import functools
 from typing import Any, Callable, Dict, Optional
 
 from ..core.audit import AuditLogger, get_logger
+from ..core.errors import PermissionDeniedError
 from ..core.overlay import GhostOverlayController, OverlayRequest
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
@@ -86,6 +87,26 @@ class SafetyMiddleware:
                     )
 
                 # Approved — proceed to execution with approval_source in audit
+
+            try:
+                self.safety_guard.check_action(tool_name, params)
+            except PermissionDeniedError as exc:
+                error_msg = str(exc)
+                result: Dict[str, Any] = {
+                    "success": False,
+                    "blocked": True,
+                    "error": error_msg,
+                }
+                entry = self.audit_logger.log_action(
+                    tool_name,
+                    params,
+                    result=result.copy(),
+                    error=error_msg,
+                    zone=decision.zone.value,
+                    executed=False,
+                )
+                result.update(self._metadata(decision, entry))
+                return result
 
             try:
                 if decision.zone == Zone.SHADOW:
