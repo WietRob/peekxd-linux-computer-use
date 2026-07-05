@@ -7,9 +7,15 @@ from typing import Any, Callable, Dict, Optional
 
 from ..core.audit import AuditLogger, get_logger
 from ..core.errors import PermissionDeniedError
+from ..core.overlay import GhostOverlayController, OverlayRequest
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
-from ..core.zones import RiskDecision, Zone, ZoneDecision
+from ..core.zones import (
+    GhostActionClassification,
+    RiskDecision,
+    Zone,
+    ZoneDecision,
+)
 
 
 class SafetyMiddleware:
@@ -22,6 +28,7 @@ class SafetyMiddleware:
         shadow_recorder: Optional[ShadowRecorder] = None,
         capture_fn: Optional[Callable[[str], None]] = None,
         get_screenshot_path_fn: Optional[Callable[[], str]] = None,
+        ghost_overlay: Optional[GhostOverlayController] = None,
     ) -> None:
         self.safety_guard = safety_guard or SafetyGuard(SafetyLevel.NORMAL)
         self.audit_logger = audit_logger or get_logger()
@@ -29,6 +36,7 @@ class SafetyMiddleware:
             capture_fn=capture_fn,
             get_screenshot_path_fn=get_screenshot_path_fn,
         )
+        self.ghost_overlay = ghost_overlay
 
     def wrap_tool(
         self,
@@ -43,7 +51,42 @@ class SafetyMiddleware:
             decision = self.safety_guard.check_zone(tool_name, params)
 
             if decision.zone == Zone.GHOST:
-                return self._blocked_response(tool_name, params, decision)
+                classification = ZoneDecision.classify_ghost_action(
+                    tool_name, params, decision.risk_factors
+                )
+
+                # HARD_BLOCKED_GHOST: no overlay, immediate block
+                if (
+                    classification.classification
+                    == GhostActionClassification.HARD_BLOCKED_GHOST
+                ):
+                    return self._blocked_response(tool_name, params, decision)
+
+                # APPROVABLE_GHOST without overlay controller: backward compat block
+                if self.ghost_overlay is None:
+                    return self._blocked_response(tool_name, params, decision)
+
+                # APPROVABLE_GHOST with overlay: show preview to user
+                preview = ZoneDecision.create_ghost_preview(
+                    tool_name, params, decision
+                )
+                overlay_request = OverlayRequest(
+                    action=tool_name,
+                    params=params,
+                    preview=preview.to_dict(),
+                )
+                overlay_decision = self.ghost_overlay.show_preview(overlay_request)
+
+                if not overlay_decision.approved:
+                    # User denied or timed out — block with classification info
+                    return self._blocked_response(
+                        tool_name,
+                        params,
+                        decision,
+                        classification=classification.classification,
+                    )
+
+                # Approved — proceed to execution with approval_source in audit
 
             try:
                 self.safety_guard.check_action(tool_name, params)
@@ -90,10 +133,14 @@ class SafetyMiddleware:
             result = self._envelope_result(raw_result)
             if shadow_result is not None:
                 result["shadow"] = shadow_result.to_dict()
+            # When a GHOST action was approved via overlay, record the approval source
+            audit_result = result.copy()
+            if decision.zone == Zone.GHOST:
+                audit_result["approval_source"] = "overlay"
             entry = self.audit_logger.log_action(
                 tool_name,
                 params,
-                result=result.copy(),
+                result=audit_result,
                 zone=decision.zone.value,
                 executed=True,
             )
@@ -107,9 +154,10 @@ class SafetyMiddleware:
         tool_name: str,
         params: Dict[str, Any],
         decision: RiskDecision,
+        classification: Optional[GhostActionClassification] = None,
     ) -> Dict[str, Any]:
         error = f"Blocked by SafetyGuard: {decision.reason or 'GHOST zone action'}"
-        result = {
+        result: Dict[str, Any] = {
             "success": False,
             "blocked": True,
             "error": error,
@@ -121,6 +169,8 @@ class SafetyMiddleware:
                 params,
                 decision,
             ).to_dict()
+        if classification is not None:
+            result["classification"] = classification.value
         entry = self.audit_logger.log_action(
             tool_name,
             params,
