@@ -357,6 +357,26 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         return {"preview": preview.to_dict(), "decision": decision.to_dict()}
 
     @mcp.tool()
+    def peekxd_preview_action(action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Return SafetyGuard.preview() output without executing the action.
+
+        Simulates what would happen for the given action+params and includes
+        the zone decision and risk metadata. This is a pure read-only tool
+        that never performs real desktop actions.
+        """
+        preview = middleware.safety_guard.preview(action, params)
+        decision = middleware.safety_guard.check_zone(action, params)
+        return {
+            "preview": preview,
+            "zone_decision": decision.to_dict(),
+            "risk_metadata": {
+                "zone": decision.zone.value,
+                "risk_level": decision.risk_level,
+                "risk_factors": decision.risk_factors,
+            },
+        }
+
+    @mcp.tool()
     def peekxd_audit_export(path: Optional[str] = None) -> Dict[str, Any]:
         """Export the current MCP audit log to JSON."""
         export_path = middleware.audit_logger.export_json(path)

@@ -100,6 +100,30 @@ class TestZoneDecision:
         decision = ZoneDecision.decide("find_element", {"description": "Submit button"})
         assert decision.zone == Zone.DIRECT
 
+    def test_ghost_preview_direct(self):
+        """peekxd_ghost_preview should be DIRECT (read-only observation)."""
+        decision = ZoneDecision.decide("peekxd_ghost_preview", {
+            "action": "type_text",
+            "params": {"text": "rm -rf /"},
+        })
+        assert decision.zone == Zone.DIRECT
+        assert decision.risk_level == "safe"
+
+    def test_preview_action_direct(self):
+        """peekxd_preview_action should be DIRECT (read-only observation).
+
+        This tool calls SafetyGuard.preview() without executing anything.
+        It must be classified as read-only so the middleware does not
+        GHOST-block it as an unknown action.
+        """
+        decision = ZoneDecision.decide("peekxd_preview_action", {
+            "action": "type_text",
+            "params": {"text": "rm -rf /"},
+        })
+        assert decision.zone == Zone.DIRECT
+        assert decision.risk_level == "safe"
+        assert decision.risk_factors == []
+
     def test_mark_elements_removed(self):
         """Mark-elements is pixel/vision capture and is blocked."""
         decision = ZoneDecision.decide("mark_elements", {})
