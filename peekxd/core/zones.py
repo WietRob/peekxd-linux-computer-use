@@ -128,6 +128,7 @@ class ZoneDecision:
         "get_active_window",
         "see_semantic",
         "peekxd_ghost_preview",
+        "peekxd_preview_action",
         "peekxd_audit_export",
         "peekxd_zone_check",
         "peekxd_safety_status",
