@@ -368,6 +368,11 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         decision = middleware.safety_guard.check_zone(action, params)
         return {"decision": decision.to_dict()}
 
+    @mcp.tool()
+    def peekxd_safety_status() -> Dict[str, Any]:
+        """Return the resolved MCP safety bypass startup policy."""
+        return bypass_policy
+
     return mcp
 
 

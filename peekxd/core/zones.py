@@ -130,6 +130,7 @@ class ZoneDecision:
         "peekxd_ghost_preview",
         "peekxd_audit_export",
         "peekxd_zone_check",
+        "peekxd_safety_status",
     }
 
     # Removed pixel-capture/vision actions. These must never be classified as
