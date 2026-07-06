@@ -6,7 +6,7 @@ import functools
 from typing import Any, Callable, Dict, List, Optional, Union, cast
 
 from ..core.audit import AuditLogger, get_logger
-from ..core.errors import PermissionDeniedError
+from ..core.errors import InterceptorNotActiveError, PermissionDeniedError
 from ..core.overlay import GhostOverlayController, OverlayRequest
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
@@ -43,6 +43,7 @@ class SafetyMiddleware:
         self._raw_overlay = ghost_overlay
         self._cached_overlay: Optional[GhostOverlayController] = None
         self.get_element_context = get_element_context
+        self._mcp: Any = None
 
     @property
     def ghost_overlay(self) -> Optional[GhostOverlayController]:
@@ -72,6 +73,35 @@ class SafetyMiddleware:
             self._cached_overlay = self._raw_overlay()
         return self._cached_overlay
 
+    def bind_mcp(self, mcp: Any) -> None:
+        """Store a reference to the MCP server for runtime interceptor guard checks."""
+        self._mcp = mcp
+
+    def assert_interceptor_active(self) -> None:
+        """Assert that the global safety interceptor is still installed on the MCP.
+
+        Raises InterceptorNotActiveError if the interceptor has been removed
+        or replaced at runtime — a safety-critical bypass that would allow
+        unguarded tool execution.
+        """
+        if self._mcp is None:
+            return
+
+        if not getattr(self._mcp, "_peekxd_global_safety_interceptor_installed", False):
+            raise InterceptorNotActiveError(
+                "Safety interceptor is not active: "
+                "the global safety interceptor flag has been cleared. "
+                "Tool dispatch is blocked."
+            )
+
+        interceptor_fn = getattr(self._mcp, "_peekxd_safety_interceptor_fn", None)
+        if interceptor_fn is None or self._mcp.tool is not interceptor_fn:
+            raise InterceptorNotActiveError(
+                "Safety interceptor is not active: "
+                "mcp.tool has been replaced from the intercepted version. "
+                "Tool dispatch is blocked."
+            )
+
     def wrap_tool(
         self,
         tool_name: str,
@@ -81,6 +111,11 @@ class SafetyMiddleware:
 
         @functools.wraps(func)
         def wrapped(*args: Any, **kwargs: Any) -> Dict[str, Any]:
+            try:
+                self.assert_interceptor_active()
+            except InterceptorNotActiveError as exc:
+                return self._interceptor_missing_response(tool_name, str(exc))
+
             params = self._params_from_call(args, kwargs)
             decision = self.safety_guard.check_zone(tool_name, params)
 
@@ -220,6 +255,27 @@ class SafetyMiddleware:
         result.update(self._metadata(decision, entry))
         return result
 
+    def _interceptor_missing_response(
+        self,
+        tool_name: str,
+        error_message: str,
+    ) -> Dict[str, Any]:
+        """Return a structured MCP error when the safety interceptor is missing."""
+        result: Dict[str, Any] = {
+            "success": False,
+            "blocked": True,
+            "error": error_message,
+        }
+        self.audit_logger.log_action(
+            tool_name,
+            {},
+            result=result.copy(),
+            error=error_message,
+            zone="interceptor_missing",
+            executed=False,
+        )
+        return result
+
     @staticmethod
     def _params_from_call(
         args: tuple[Any, ...],
@@ -274,4 +330,5 @@ def install_global_safety_interceptor(mcp: Any, middleware: SafetyMiddleware) ->
     setattr(mcp, "_peekxd_original_tool", original_tool)
     setattr(mcp, "tool", intercepted_tool)
     setattr(mcp, "_peekxd_global_safety_interceptor_installed", True)
+    setattr(mcp, "_peekxd_safety_interceptor_fn", intercepted_tool)
     return mcp
