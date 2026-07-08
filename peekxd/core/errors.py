@@ -40,3 +40,7 @@ class PermissionDeniedError(peekxdError):
 
 class WindowError(peekxdError):
     """Raised when window operation fails."""
+
+
+class InterceptorNotActiveError(peekxdError):
+    """Raised when the MCP safety interceptor is not active at runtime."""

@@ -182,6 +182,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     bypass_safety = bypass_policy["safety_bypass_enabled"]
     if not bypass_safety:
         install_global_safety_interceptor(mcp, middleware)
+        middleware.bind_mcp(mcp)
 
     @mcp.tool()
     def see_semantic(
