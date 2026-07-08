@@ -18,6 +18,23 @@ from ..core.zones import (
 )
 from ..safety.overlay import build_ghost_overlay_context
 
+MCP_SAFETY_CAPABILITY_VERSION = "peekxd.mcp_safety.v1"
+
+
+def build_safety_capability(
+    *,
+    registration_interceptor: bool,
+    dispatch_guard: bool,
+) -> Dict[str, Any]:
+    """Return the stable MCP safety capability advertised at initialize."""
+    return {
+        "name": "peekxd_safety",
+        "version": MCP_SAFETY_CAPABILITY_VERSION,
+        "registration_interceptor": registration_interceptor,
+        "dispatch_guard": dispatch_guard,
+        "audit_id": "required",
+    }
+
 
 class SafetyMiddleware:
     """Apply SafetyGuard zone checks and audit logging to MCP tool calls."""
@@ -299,6 +316,7 @@ class SafetyMiddleware:
             "risk_level": decision.risk_level,
             "risk_factors": decision.risk_factors,
             "audit_id": f"{entry.session_id}:{entry.step}",
+            "safety_capability_version": MCP_SAFETY_CAPABILITY_VERSION,
         }
 
 

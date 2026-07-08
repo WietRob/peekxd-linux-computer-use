@@ -26,6 +26,7 @@ from ..screenshot import get_screenshot_provider
 from ..semantic import build_semantic_snapshot
 from .middleware import (
     SafetyMiddleware,
+    build_safety_capability,
     install_dispatch_safety_guard,
     install_global_safety_interceptor,
 )
@@ -163,13 +164,34 @@ def _create_shadow_recorder(config: ConfigManager) -> ShadowRecorder:
     return ShadowRecorder(capture_fn=capture, get_screenshot_path_fn=next_path)
 
 
+def _create_fastmcp_with_safety_capability(capability: Dict[str, Any]):
+    """Create FastMCP with initialize-time safety capability metadata."""
+    try:
+        mcp = FastMCP(
+            "peekxd-linux",
+            experimental_capabilities={"peekxd_safety": capability},
+        )
+    except TypeError:
+        mcp = FastMCP("peekxd-linux")
+    setattr(mcp, "_peekxd_safety_capability", capability)
+    return mcp
+
+
 def create_mcp_server(config: Optional[ConfigManager] = None):
     """Create and configure the FastMCP server."""
     if FastMCP is None:
         raise ImportError("fastmcp not installed. Run: pip install fastmcp")
 
     config = config or ConfigManager()
-    mcp = FastMCP("peekxd-linux")
+    bypass_policy = _mcp_safety_bypass_policy(config)
+    bypass_safety = bypass_policy["safety_bypass_enabled"]
+    safety_capability = build_safety_capability(
+        registration_interceptor=not bypass_safety,
+        dispatch_guard=not bypass_safety,
+    )
+    safety_status_policy = dict(bypass_policy)
+    safety_status_policy["safety_capability"] = safety_capability
+    mcp = _create_fastmcp_with_safety_capability(safety_capability)
     safety_level = config.get("mcp.safety_level", "normal")
     try:
         guard = SafetyGuard(SafetyLevel(str(safety_level).lower()))
@@ -181,9 +203,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         audit_logger=audit_logger,
         shadow_recorder=_create_shadow_recorder(config),
     )
-    bypass_policy = _mcp_safety_bypass_policy(config)
     audit_logger.log_action("mcp_startup_policy", bypass_policy, {"success": True})
-    bypass_safety = bypass_policy["safety_bypass_enabled"]
     if not bypass_safety:
         install_global_safety_interceptor(mcp, middleware)
         middleware.bind_mcp(mcp)
@@ -397,7 +417,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     @mcp.tool()
     def peekxd_safety_status() -> Dict[str, Any]:
         """Return the resolved MCP safety bypass startup policy."""
-        return bypass_policy
+        return safety_status_policy
 
     return mcp
 
