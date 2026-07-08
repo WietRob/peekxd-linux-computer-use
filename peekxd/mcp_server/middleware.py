@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, Dict, List, Optional, Union, cast
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Union, cast
 
 from ..core.audit import AuditLogger, get_logger
 from ..core.errors import InterceptorNotActiveError, PermissionDeniedError
@@ -331,4 +331,125 @@ def install_global_safety_interceptor(mcp: Any, middleware: SafetyMiddleware) ->
     setattr(mcp, "tool", intercepted_tool)
     setattr(mcp, "_peekxd_global_safety_interceptor_installed", True)
     setattr(mcp, "_peekxd_safety_interceptor_fn", intercepted_tool)
+    return mcp
+
+
+def _dispatch_result(payload: Dict[str, Any], *, is_error: bool = False) -> Any:
+    """Return a FastMCP-compatible dispatch result for synthetic guard responses."""
+    try:
+        from fastmcp.tools import ToolResult
+    except ImportError:
+        return payload
+
+    return ToolResult(structured_content=payload, is_error=is_error)
+
+
+def _append_dispatch_metadata(result: Any, metadata: Dict[str, Any]) -> Any:
+    """Append safety metadata to common FastMCP or test dispatch result shapes."""
+    if isinstance(result, dict):
+        enriched = dict(result)
+        enriched.update(metadata)
+        return enriched
+
+    structured_content = getattr(result, "structured_content", None)
+    if isinstance(structured_content, dict):
+        structured_content.update(metadata)
+    return result
+
+
+def _audit_payload_from_dispatch_result(result: Any) -> Dict[str, Any]:
+    """Extract a safe audit payload from common dispatch result shapes."""
+    if isinstance(result, dict):
+        return dict(result)
+
+    structured_content = getattr(result, "structured_content", None)
+    if isinstance(structured_content, dict):
+        return dict(structured_content)
+
+    return {"success": True}
+
+
+def install_dispatch_safety_guard(mcp: Any, middleware: SafetyMiddleware) -> Any:
+    """Guard MCP tool calls at dispatch time.
+
+    The registration interceptor protects tools that go through ``mcp.tool()``.
+    This dispatch guard protects the final ``call_tool`` path as well, so tools
+    injected directly into a server registry are still classified, blocked, and
+    audited before execution.
+    """
+    if vars(mcp).get("_peekxd_dispatch_safety_guard_installed", False):
+        return mcp
+    if not hasattr(mcp, "call_tool"):
+        return mcp
+
+    original_call_tool = mcp.call_tool
+
+    async def guarded_call_tool(
+        name: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any:
+        params = dict(arguments or {})
+        try:
+            middleware.assert_interceptor_active()
+        except InterceptorNotActiveError as exc:
+            response = middleware._interceptor_missing_response(name, str(exc))
+            return _dispatch_result(response, is_error=True)
+
+        decision = middleware.safety_guard.check_zone(name, params)
+        if decision.zone == Zone.GHOST:
+            response = middleware._blocked_response(name, params, decision)
+            return _dispatch_result(response, is_error=True)
+
+        try:
+            middleware.safety_guard.check_action(name, params)
+        except PermissionDeniedError as exc:
+            error_msg = str(exc)
+            response: Dict[str, Any] = {
+                "success": False,
+                "blocked": True,
+                "error": error_msg,
+            }
+            entry = middleware.audit_logger.log_action(
+                name,
+                params,
+                result=response.copy(),
+                error=error_msg,
+                zone=decision.zone.value,
+                executed=False,
+            )
+            response.update(middleware._metadata(decision, entry))
+            return _dispatch_result(response, is_error=True)
+
+        try:
+            result = await cast(
+                Callable[..., Awaitable[Any]],
+                original_call_tool,
+            )(name, arguments, *args, **kwargs)
+        except Exception as exc:
+            middleware.audit_logger.log_action(
+                name,
+                params,
+                result=decision.to_dict(),
+                error=str(exc),
+                zone=decision.zone.value,
+                executed=False,
+            )
+            raise
+
+        audit_result = _audit_payload_from_dispatch_result(result)
+        entry = middleware.audit_logger.log_action(
+            name,
+            params,
+            result=audit_result,
+            zone=decision.zone.value,
+            executed=True,
+        )
+        return _append_dispatch_metadata(result, middleware._metadata(decision, entry))
+
+    setattr(mcp, "_peekxd_original_call_tool", original_call_tool)
+    setattr(mcp, "call_tool", guarded_call_tool)
+    setattr(mcp, "_peekxd_dispatch_safety_guard_installed", True)
+    setattr(mcp, "_peekxd_dispatch_safety_guard_fn", guarded_call_tool)
     return mcp

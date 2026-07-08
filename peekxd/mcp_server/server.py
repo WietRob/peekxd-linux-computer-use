@@ -24,7 +24,11 @@ from ..core.shadow import ShadowRecorder
 from ..core.zones import ZoneDecision
 from ..screenshot import get_screenshot_provider
 from ..semantic import build_semantic_snapshot
-from .middleware import SafetyMiddleware, install_global_safety_interceptor
+from .middleware import (
+    SafetyMiddleware,
+    install_dispatch_safety_guard,
+    install_global_safety_interceptor,
+)
 
 _input = None
 _inspection = None
@@ -183,6 +187,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     if not bypass_safety:
         install_global_safety_interceptor(mcp, middleware)
         middleware.bind_mcp(mcp)
+        install_dispatch_safety_guard(mcp, middleware)
 
     @mcp.tool()
     def see_semantic(
