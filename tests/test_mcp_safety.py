@@ -4,7 +4,10 @@ from unittest.mock import MagicMock
 
 from peekxd.core.audit import AuditLogger
 from peekxd.core.zones import RiskDecision, Zone
-from peekxd.mcp_server.middleware import SafetyMiddleware
+from peekxd.mcp_server.middleware import (
+    MCP_SAFETY_CAPABILITY_VERSION,
+    SafetyMiddleware,
+)
 
 
 def test_middleware_enriches_dict_response_with_zone_and_audit_id():
@@ -29,6 +32,7 @@ def test_middleware_enriches_dict_response_with_zone_and_audit_id():
     assert result["zone"] == "direct"
     assert result["risk_level"] == "safe"
     assert result["audit_id"] == "mcp-test:0"
+    assert result["safety_capability_version"] == MCP_SAFETY_CAPABILITY_VERSION
     assert logger.actions[0].action == "move_mouse"
     assert logger.actions[0].result["zone"] == "direct"
     assert logger.actions[0].result["executed"] is True

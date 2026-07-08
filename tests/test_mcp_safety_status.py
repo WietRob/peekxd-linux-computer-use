@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from peekxd.config import ConfigManager
 from peekxd.mcp_server import create_mcp_server
+from peekxd.mcp_server.middleware import MCP_SAFETY_CAPABILITY_VERSION
 
 
 def _collect_tools(config):
@@ -35,6 +36,9 @@ def test_safety_status_returns_policy_with_env_absent(monkeypatch, tmp_path):
     assert result["trusted_bootstrap"] is False
     assert result["transport"] == "stdio"
     assert result["host"] == "localhost"
+    assert result["safety_capability"]["version"] == MCP_SAFETY_CAPABILITY_VERSION
+    assert result["safety_capability"]["registration_interceptor"] is True
+    assert result["safety_capability"]["dispatch_guard"] is True
 
 
 def test_safety_status_returns_policy_with_allowlist_env(monkeypatch, tmp_path):
@@ -97,3 +101,25 @@ def test_safety_status_tool_is_registered():
     assert "peekxd_safety_status" in tools, (
         f"peekxd_safety_status not found in registered tools: {list(tools.keys())}"
     )
+
+
+def test_safety_capability_advertised_to_fastmcp_initialize(monkeypatch, tmp_path):
+    """FastMCP initialize metadata advertises the safety capability version."""
+    monkeypatch.delenv("PEEKXD_SAFETY_MCP", raising=False)
+    config = ConfigManager(str(tmp_path / "config.json"))
+    mock_mcp = MagicMock()
+
+    def capture_tool(func):
+        return func
+
+    mock_mcp.tool = MagicMock(return_value=capture_tool)
+
+    with patch("peekxd.mcp_server.server.FastMCP", return_value=mock_mcp) as fastmcp:
+        server = create_mcp_server(config)
+
+    capability = fastmcp.call_args.kwargs["experimental_capabilities"][
+        "peekxd_safety"
+    ]
+    assert capability["version"] == MCP_SAFETY_CAPABILITY_VERSION
+    assert capability["audit_id"] == "required"
+    assert server._peekxd_safety_capability == capability
