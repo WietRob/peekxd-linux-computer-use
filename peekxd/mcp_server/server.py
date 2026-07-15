@@ -22,6 +22,7 @@ from ..core.audit import get_logger
 from ..core.safety import SafetyGuard, SafetyLevel
 from ..core.shadow import ShadowRecorder
 from ..core.zones import ZoneDecision
+from ..safety.overlay import OverlayControllerFactory
 from ..screenshot import get_screenshot_provider
 from ..semantic import build_semantic_snapshot
 from .middleware import (
@@ -164,6 +165,15 @@ def _create_shadow_recorder(config: ConfigManager) -> ShadowRecorder:
     return ShadowRecorder(capture_fn=capture, get_screenshot_path_fn=next_path)
 
 
+def _mcp_overlay_factory(config: ConfigManager):
+    """Return the configured lazy GHOST overlay factory, if enabled."""
+    overlay = config.get("mcp.overlay", None)
+    if not overlay:
+        return None
+    timeout = int(config.get("mcp.overlay_timeout", 5))
+    return OverlayControllerFactory(backend_name=str(overlay), timeout=timeout)
+
+
 def _create_fastmcp_with_safety_capability(capability: Dict[str, Any]):
     """Create FastMCP with initialize-time safety capability metadata."""
     try:
@@ -202,6 +212,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
         safety_guard=guard,
         audit_logger=audit_logger,
         shadow_recorder=_create_shadow_recorder(config),
+        ghost_overlay=_mcp_overlay_factory(config),
     )
     audit_logger.log_action("mcp_startup_policy", bypass_policy, {"success": True})
     if not bypass_safety:
@@ -405,7 +416,9 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     @mcp.tool()
     def peekxd_audit_export(path: Optional[str] = None) -> Dict[str, Any]:
         """Export the current MCP audit log to JSON."""
-        export_path = middleware.audit_logger.export_json(path)
+        export_path = middleware.audit_logger.export_json(
+            config.get("mcp.audit_export", None) if path is None else path
+        )
         return {"success": True, "path": export_path}
 
     @mcp.tool()

@@ -461,12 +461,36 @@ def compatibility(as_json):
 @cli.command()
 @click.option("--port", default=3000, help="Port for SSE transport")
 @click.option("--transport", default="stdio", type=click.Choice(["stdio", "sse"]))
-def mcp(port, transport):
+@click.option(
+    "--safety-level",
+    default=None,
+    type=click.Choice(["strict", "normal", "permissive"]),
+    help="Initial MCP SafetyGuard level",
+)
+@click.option(
+    "--overlay",
+    default=None,
+    type=click.Choice(["auto", "noop", "tkinter"]),
+    help="Enable GHOST approval overlay backend for MCP actions",
+)
+@click.option(
+    "--audit-export",
+    default=None,
+    type=click.Path(),
+    help="Default path used by the peekxd_audit_export MCP tool",
+)
+def mcp(port, transport, safety_level, overlay, audit_export):
     """Run MCP server."""
     from .mcp_server import create_mcp_server
     config = ConfigManager()
     config.set("mcp.transport", transport)
     config.set("mcp.port", port)
+    if safety_level is not None:
+        config.set("mcp.safety_level", safety_level)
+    if overlay is not None:
+        config.set("mcp.overlay", overlay)
+    if audit_export is not None:
+        config.set("mcp.audit_export", audit_export)
     server = create_mcp_server(config)
     if transport == "stdio":
         server.run(transport="stdio", show_banner=False)

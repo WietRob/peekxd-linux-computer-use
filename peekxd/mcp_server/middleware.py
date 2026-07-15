@@ -420,6 +420,38 @@ def install_dispatch_safety_guard(mcp: Any, middleware: SafetyMiddleware) -> Any
             response = middleware._blocked_response(name, params, decision)
             return _dispatch_result(response, is_error=True)
 
+        if decision.zone == Zone.SHADOW and middleware.ghost_overlay is not None:
+            ghost_decision = RiskDecision(
+                zone=Zone.GHOST,
+                risk_level=decision.risk_level,
+                risk_factors=decision.risk_factors,
+                reason="Configured overlay requires approval for SHADOW action",
+            )
+            classification = ZoneDecision.classify_ghost_action(
+                name,
+                params,
+                ghost_decision.risk_factors,
+            )
+            preview = ZoneDecision.create_ghost_preview(name, params, ghost_decision)
+            overlay_request = OverlayRequest(
+                action=name,
+                params=params,
+                preview=preview.to_dict(),
+            )
+            if middleware.get_element_context is not None:
+                elements = middleware.get_element_context()
+                build_ghost_overlay_context(overlay_request, elements)
+            overlay_decision = middleware.ghost_overlay.show_preview(overlay_request)
+            if not overlay_decision.approved:
+                response = middleware._blocked_response(
+                    name,
+                    params,
+                    ghost_decision,
+                    classification=classification.classification,
+                )
+                return _dispatch_result(response, is_error=True)
+            decision = ghost_decision
+
         try:
             middleware.safety_guard.check_action(name, params)
         except PermissionDeniedError as exc:

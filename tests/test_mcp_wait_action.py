@@ -64,9 +64,13 @@ def test_wait_for_element_polls_semantic_snapshots_and_returns_last_metadata(tmp
         ]
     )
 
-    with patch(
-        "peekxd.mcp_server.server.build_semantic_snapshot",
-        side_effect=lambda **_: next(snapshots),
+    with (
+        patch(
+            "peekxd.mcp_server.server.build_semantic_snapshot",
+            side_effect=lambda **_: next(snapshots),
+        ),
+        patch("peekxd.mcp_server.server._get_inspection", return_value=MagicMock()),
+        patch("peekxd.mcp_server.server._get_window", return_value=MagicMock()),
     ):
         result = tools["wait_for_element"]("Submit", timeout=1.0, poll_interval=0)
 
@@ -83,9 +87,19 @@ def test_wait_for_element_polls_semantic_snapshots_and_returns_last_metadata(tmp
 def test_wait_for_text_times_out_with_last_observed_semantic_metadata(tmp_path):
     config = ConfigManager(str(tmp_path / "config.json"))
     tools = _collect_tools(config)
-    snapshot = _snapshot("snap-last", [_element("W1-T1", name="Loading", label="Loading")])
+    snapshot = _snapshot(
+        "snap-last",
+        [_element("W1-T1", name="Loading", label="Loading")],
+    )
 
-    with patch("peekxd.mcp_server.server.build_semantic_snapshot", return_value=snapshot):
+    with (
+        patch(
+            "peekxd.mcp_server.server.build_semantic_snapshot",
+            return_value=snapshot,
+        ),
+        patch("peekxd.mcp_server.server._get_inspection", return_value=MagicMock()),
+        patch("peekxd.mcp_server.server._get_window", return_value=MagicMock()),
+    ):
         result = tools["wait_for_text"]("Done", timeout=0, poll_interval=0)
 
     assert result["success"] is False
