@@ -123,3 +123,44 @@ def test_audit_export_flag_supplies_default_export_path(tmp_path):
     assert result["success"] is True
     assert result["path"] == str(audit_path)
     assert audit_path.exists()
+
+
+def test_audit_export_explicit_path_overrides_configured_default(tmp_path):
+    """An explicit export path should take precedence over the configured default."""
+    config = ConfigManager(str(tmp_path / "config.json"))
+    config.set("mcp.audit_export", str(tmp_path / "configured.json"))
+    explicit_path = str(tmp_path / "explicit.json")
+    audit_logger = MagicMock()
+    audit_logger.export_json.side_effect = lambda path: path
+
+    with (
+        patch("peekxd.mcp_server.server.FastMCP", side_effect=CapturingMCP),
+        patch("peekxd.mcp_server.server.get_logger", return_value=audit_logger),
+    ):
+        server = create_mcp_server(config)
+
+    result = server.tools["peekxd_audit_export"](explicit_path)
+
+    audit_logger.export_json.assert_called_once_with(explicit_path)
+    assert result["success"] is True
+    assert result["path"] == explicit_path
+
+
+def test_audit_export_explicit_empty_path_does_not_use_configured_default(tmp_path):
+    """An explicit empty path should be forwarded instead of treated as absent."""
+    config = ConfigManager(str(tmp_path / "config.json"))
+    config.set("mcp.audit_export", str(tmp_path / "configured.json"))
+    audit_logger = MagicMock()
+    audit_logger.export_json.side_effect = lambda path: path
+
+    with (
+        patch("peekxd.mcp_server.server.FastMCP", side_effect=CapturingMCP),
+        patch("peekxd.mcp_server.server.get_logger", return_value=audit_logger),
+    ):
+        server = create_mcp_server(config)
+
+    result = server.tools["peekxd_audit_export"]("")
+
+    audit_logger.export_json.assert_called_once_with("")
+    assert result["success"] is True
+    assert result["path"] == ""

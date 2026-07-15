@@ -417,7 +417,7 @@ def create_mcp_server(config: Optional[ConfigManager] = None):
     def peekxd_audit_export(path: Optional[str] = None) -> Dict[str, Any]:
         """Export the current MCP audit log to JSON."""
         export_path = middleware.audit_logger.export_json(
-            path or config.get("mcp.audit_export", None)
+            config.get("mcp.audit_export", None) if path is None else path
         )
         return {"success": True, "path": export_path}
 
