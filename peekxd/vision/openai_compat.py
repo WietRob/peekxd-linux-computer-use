@@ -17,8 +17,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from peekxd.vision.base import VisionProvider
 from peekxd.core.errors import VisionError
+from peekxd.vision.base import VisionProvider
 
 
 def _encode_image(image_path: str) -> str:
