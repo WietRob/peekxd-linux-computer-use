@@ -669,6 +669,91 @@ def safety_preview(action, params_json):
     click.echo(dry.summary())
 
 
+@safety.command(name="decide")
+@click.argument("action")
+@click.argument("params_json", default="{}")
+@click.option("--entry-point", default="cli", help="Calling surface: cli|macro|mcp|orchestrator|bridge")
+@click.option("--json-output", "as_json", is_flag=True, help="Emit the SafetyDecision as JSON")
+def safety_decide(action, params_json, entry_point, as_json):
+    """Obtain the canonical SafetyDecision for an action (no execution).
+
+    This is the single policy boundary: every entry point must consume
+    this decision rather than duplicating policy logic.
+    """
+    import json as _json
+    from .core.decision import get_gate
+
+    params = _json.loads(params_json) if params_json else {}
+    decision = get_gate().evaluate(action, params, entry_point=entry_point)
+    if as_json:
+        click.echo(_json.dumps(decision.to_dict(), indent=2))
+        return
+    click.echo(
+        f"decision_id={decision.decision_id}\n"
+        f"zone={decision.zone} classification={decision.ghost_classification}\n"
+        f"policy={decision.policy_result} approval_state={decision.required_approval_state}\n"
+        f"expiry={decision.expiry} nonce={decision.execution_nonce[:8]}…\n"
+        f"correlation={decision.evidence_correlation_id}\n"
+        f"reason={decision.reason}"
+    )
+
+
+@safety.command(name="approve")
+@click.argument("decision_id")
+@click.option("--json-output", "as_json", is_flag=True)
+def safety_approve(decision_id, as_json):
+    """Approve a pending APPROVABLE_GHOST decision (permits ONE execution)."""
+    import json as _json
+    from .core.decision import ApprovalStore, DecisionStateError
+
+    store = ApprovalStore()
+    try:
+        rec = store.approve(decision_id)
+    except DecisionStateError as exc:
+        click.echo(f"REJECTED: {exc}")
+        raise SystemExit(1)
+    if as_json:
+        click.echo(_json.dumps(rec, indent=2))
+        return
+    click.echo(f"APPROVED: {decision_id} (single-use; expires {rec.get('expiry')})")
+
+
+@safety.command(name="deny")
+@click.argument("decision_id")
+def safety_deny(decision_id):
+    """Deny a pending decision — executes nothing."""
+    from .core.decision import ApprovalStore, DecisionStateError
+
+    try:
+        ApprovalStore().deny(decision_id)
+        click.echo(f"DENIED: {decision_id}")
+    except DecisionStateError as exc:
+        click.echo(f"REJECTED: {exc}")
+        raise SystemExit(1)
+
+
+@safety.command(name="status")
+@click.argument("decision_id", required=False)
+def safety_status_cmd(decision_id):
+    """Show approval-ledger state for a decision (or recent ones)."""
+    from .core.decision import ApprovalStore
+
+    store = ApprovalStore()
+    if decision_id:
+        rec = store.load(decision_id)
+        if rec is None:
+            click.echo("UNKNOWN decision")
+            raise SystemExit(1)
+        click.echo(json.dumps(rec, indent=2))
+        return
+    import glob as _glob
+    rows = []
+    for p in sorted(_glob.glob(str(store._dir / "*.json")))[-10:]:
+        rec = json.loads(Path(p).read_text())
+        rows.append(f"{rec['decision_id']}  {rec.get('approval_state'):9s}  {rec.get('action')}")
+    click.echo("\n".join(rows) or "no decisions recorded")
+
+
 @cli.command()
 @click.option("--max-age", default=24.0, help="Max age in hours")
 @click.option("--max-files", default=100, help="Max files to keep")
