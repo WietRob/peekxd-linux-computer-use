@@ -55,9 +55,11 @@ def test_credential_text_is_hard_blocked_per_v4_policy(gate):
     assert not g.is_execution_allowed(d)
 
 
-def test_approve_then_consume_exactly_once(gate):
-    g, store = gate
-    d = g.evaluate("type", {"text": "password reset link"}, entry_point="cli")
+def test_approve_then_consume_exactly_once(tmp_path):
+    store = ApprovalStore(directory=tmp_path / "approvals")
+    g = SafetyDecisionGate(approval_store=store, confirmable=True)
+    d = g.evaluate("type", {"text": "hello world"}, entry_point="cli")
+    assert d.policy_result == "require_approval"
     assert g.authorize(d) is True
     # replay of approve is rejected (already approved→consumed flow still one exec)
     rec = store.load(d.decision_id)

@@ -674,7 +674,9 @@ def safety_preview(action, params_json):
 @click.argument("params_json", default="{}")
 @click.option("--entry-point", default="cli", help="Calling surface: cli|macro|mcp|orchestrator|bridge")
 @click.option("--json-output", "as_json", is_flag=True, help="Emit the SafetyDecision as JSON")
-def safety_decide(action, params_json, entry_point, as_json):
+@click.option("--confirmable/--no-confirmable", default=False,
+              help="Route zero-risk approvable actions to the confirmable-ghost approval flow (Softbox V4)")
+def safety_decide(action, params_json, entry_point, as_json, confirmable):
     """Obtain the canonical SafetyDecision for an action (no execution).
 
     This is the single policy boundary: every entry point must consume
@@ -684,7 +686,9 @@ def safety_decide(action, params_json, entry_point, as_json):
     from .core.decision import get_gate
 
     params = _json.loads(params_json) if params_json else {}
-    decision = get_gate().evaluate(action, params, entry_point=entry_point)
+    from .core.decision import SafetyDecisionGate
+    gate = SafetyDecisionGate(confirmable=confirmable) if confirmable else get_gate()
+    decision = gate.evaluate(action, params, entry_point=entry_point)
     if as_json:
         click.echo(_json.dumps(decision.to_dict(), indent=2))
         return

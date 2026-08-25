@@ -166,10 +166,17 @@ class ApprovalStore:
 
     def approve(self, decision_id: str) -> Dict[str, Any]:
         rec = self._require(decision_id)
+        if rec.get("policy_result") != "require_approval":
+            # HARD_BLOCKED / allow-path decisions cannot be approved
+            raise DecisionStateError(
+                decision_id, f"not approvable (policy={rec.get('policy_result')})")
         if rec["approval_state"] == "consumed":
             raise DecisionStateError(decision_id, "already consumed")
         if rec["approval_state"] == "denied":
             raise DecisionStateError(decision_id, "already denied")
+        if rec["approval_state"] == "approved":
+            # duplicate approval delivery is rejected — exactly-once semantics
+            raise DecisionStateError(decision_id, "already approved")
         if self._expired(rec):
             rec["approval_state"] = "expired"
             self.save(rec)
