@@ -39,6 +39,10 @@ def build_safety_capability(
 class SafetyMiddleware:
     """Apply SafetyGuard zone checks and audit logging to MCP tool calls."""
 
+    #: Envelope digest preauthorized by the dispatch guard (skips the
+    #: second overlay prompt for that exact envelope); None when unset.
+    _preauthorized_digest: Optional[str] = None
+
     def __init__(
         self,
         safety_guard: Optional[SafetyGuard] = None,
@@ -208,7 +212,16 @@ class SafetyMiddleware:
                 policy = safety_decision.policy_result
 
             # APPROVABLE_GHOST: overlay preview → explicit approval required.
-            if policy == "require_approval":
+            # A dispatch-guard preauthorization for THIS exact envelope
+            # replaces the second overlay prompt: the record was already
+            # APPROVED by the dispatch path and is CLAIMED+EXECUTED by the
+            # SafetyExecutor below.
+            if policy == "require_approval" and (
+                    getattr(self, "_preauthorized_digest", None)
+                    == safety_decision.envelope_digest):
+                self._preauthorized_digest = None
+                overlay_approved_this_call = True
+            elif policy == "require_approval":
                 risk = ZoneDecision.decide(tool_name, params)  # preview info only
                 classification = ZoneDecision.classify_ghost_action(
                     tool_name, params, risk.risk_factors

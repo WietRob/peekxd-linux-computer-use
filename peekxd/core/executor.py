@@ -87,6 +87,18 @@ class SafetyExecutor:
         if decision.policy_result in ("hard_blocked", "fail_closed", "deny"):
             raise DecisionDeniedError(decision)
 
+        # Envelope binding check: when the decision carries a canonical
+        # envelope digest and the caller supplies an envelope, they must
+        # match exactly — otherwise the claimed approval would not bind
+        # the payload actually executed (fail closed).
+        if envelope is not None:
+            recorded = getattr(decision, "envelope_digest", "")
+            if recorded and envelope.digest() != recorded:
+                raise SafetyExecutionBlocked(
+                    "caller envelope digest does not match decision binding",
+                    decision,
+                )
+
         expiry = getattr(decision, "expiry", None)
         if expiry is not None and time.time() > float(expiry):
             try:

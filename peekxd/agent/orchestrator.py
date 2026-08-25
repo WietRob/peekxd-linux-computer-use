@@ -436,6 +436,19 @@ If the task is complete, use action "done"."""
         if action == "done":
             return {"success": True, "detail": "Task marked complete", "done": True}
 
+        # Resolve memory-cached element positions BEFORE the canonical
+        # evaluation so the claimed envelope digest binds the FINAL params
+        # actually executed (x/y injected, element_description removed) —
+        # not the raw pre-resolution payload.
+        if action == "click" and "element_description" in params:
+            desc = params["element_description"]
+            if self.memory:
+                cached = self.memory.recall_element(desc, max_age_hours=0.5)
+                if cached:
+                    # Use cached position, skip vision lookup
+                    params = {**params, "x": cached[0], "y": cached[1]}
+                    del params["element_description"]
+
         # ---- canonical SafetyDecision boundary (G3): the gate — not the
         # legacy SafetyGuard — makes the execution decision. Fail closed.
         from ..core.decision import (
@@ -793,22 +806,16 @@ If the task is complete, use action "done"."""
                 return result
 
             # --- V2 Normal SHADOW execution (no confirmable-ghost overlay) ---
-            # Memory lookup for click actions (same as non-shadow)
-            resolved_params = dict(params)
-            if action == "click" and "element_description" in resolved_params:
-                desc = resolved_params["element_description"]
-                if self.memory:
-                    cached = self.memory.recall_element(desc, max_age_hours=0.5)
-                    if cached:
-                        resolved_params = {**resolved_params, "x": cached[0], "y": cached[1]}
-                        del resolved_params["element_description"]
+            # Memory-cached element positions were resolved BEFORE the
+            # canonical evaluation, so `params` is already the FINAL payload
+            # and the decision's envelope digest binds exactly what runs.
 
             # Shadow snapshots used to require screenshots. Execute the action
             # through the canonical SafetyExecutor (atomic claim → run).
             from ..core.executor import build_envelope_from_decision, get_executor
 
             def _run_shadow() -> Any:
-                return self._execute_action(action, resolved_params)
+                return self._execute_action(action, params)
 
             try:
                 envelope = build_envelope_from_decision(safety_decision, params)
@@ -838,7 +845,7 @@ If the task is complete, use action "done"."""
             if self.audit:
                 self.audit.log_action(
                     action=action,
-                    params=resolved_params,
+                    params=params,
                     result=action_result,
                     zone=zone_decision.zone.value,
                     executed=True,
@@ -854,15 +861,8 @@ If the task is complete, use action "done"."""
         except Exception as safety_err:
             return {"success": False, "detail": str(safety_err), "blocked": True}
 
-        # Check memory for element positions (for click actions)
-        if action == "click" and "element_description" in params:
-            desc = params["element_description"]
-            if self.memory:
-                cached = self.memory.recall_element(desc, max_age_hours=0.5)
-                if cached:
-                    # Use cached position, skip vision lookup
-                    params = {**params, "x": cached[0], "y": cached[1]}
-                    del params["element_description"]
+        # Memory-cached positions were already resolved BEFORE the canonical
+        # evaluation above; `params` is the FINAL payload here.
 
         # Execute the action through the canonical SafetyExecutor boundary.
         from ..core.executor import build_envelope_from_decision, get_executor

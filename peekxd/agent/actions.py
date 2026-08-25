@@ -205,9 +205,10 @@ class ActionSequence:
                     # Exact binding ONLY: an out-of-band approval redeems this
                     # decision by its exact decision_id + execution_nonce +
                     # full envelope digest. No action+digest search.
-                    prior_id = approved_decision_id
+                    prior_id: Optional[str] = approved_decision_id
                     prior_nonce = execution_nonce
                     redeemed = False
+                    from ..core.decision import DecisionLedgerError
                     if prior_id and prior_nonce:
                         # Revalidate the COMPLETE envelope: the approved
                         # record's stored digest must equal the digest of the
@@ -239,8 +240,22 @@ class ActionSequence:
                                     envelope_digest=decision.envelope_digest,
                                 )
                                 gate.store.mark_executed(prior_id)
+                                # The ledger must show the permit (PRIOR
+                                # decision) EXECUTED bound to THIS exact
+                                # envelope before any side effect runs.
+                                permit_rec = gate.store.load(prior_id) or {}
+                                if (permit_rec.get("approval_state") != "executed"
+                                        or env.digest()
+                                        != str(permit_rec.get("envelope_digest") or "")):
+                                    raise DecisionLedgerError(
+                                        f"redeemed permit {prior_id} is not "
+                                        f"EXECUTED bound to this envelope")
                                 redeemed = True
                                 result["redeemed_approval_decision_id"] = prior_id
+                                result["executed_under_decision_id"] = prior_id
+                                result["decision_ids"] = [
+                                    prior_id, decision.decision_id,
+                                ]
                             except Exception:
                                 redeemed = False
                     if not redeemed:
@@ -264,10 +279,17 @@ class ActionSequence:
 
                 if decision.policy_result == "require_approval":
                     # reached only when an exact-bound approval was redeemed
-                    # above (the PRIOR decision was claimed+executed). Run the
-                    # raw step now — the redeemed approval IS the permit —
-                    # then record success. This run's own decision stays
-                    # pending; it is a fresh evaluation, not the approved one.
+                    # above (the PRIOR decision was claimed+executed). The
+                    # redeemed prior approval IS the permit for this side
+                    # effect; this run's own decision must be resolved
+                    # TERMINALLY so it can never later be approved/claimed
+                    # for an action that has already executed.
+                    try:
+                        gate.store.mark_linked_consumed(
+                            decision.decision_id, str(prior_id or ""))
+                    except Exception:
+                        pass  # never blocks the already-permitted execution
+                    result["current_decision_resolved"] = "consumed"
                     for attempt in range(step.retry):
                         try:
                             self._execute_step(step, result)

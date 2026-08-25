@@ -68,8 +68,12 @@ def test_concurrent_duplicate_claims_across_processes_execute_once(store):
 
     claimed = [o for o in outcomes if o[0] == "claimed"]
     rejected = [o for o in outcomes if o[0] == "rejected"]
-    assert len(claimed) <= 1, f"multiple processes claimed: {outcomes}"
-    assert len(rejected) >= 3, f"losers must be rejected before side effect: {outcomes}"
+    # Exactly ONE winner among all N racers; every loser rejected BEFORE any
+    # side effect (no lost/unknown outcomes either).
+    assert len(claimed) == 1, f"exactly one process must claim: {outcomes}"
+    assert len(claimed) + len(rejected) == 4, \
+        f"every racer must resolve to claimed/rejected: {outcomes}"
+    assert len(rejected) == 3, f"losers must be rejected before side effect: {outcomes}"
 
 
 def test_replay_rejected_after_execution(store):

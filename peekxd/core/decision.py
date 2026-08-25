@@ -156,63 +156,115 @@ class ApprovalStore:
                 f"approval ledger unreadable for {decision_id}: {exc}") from exc
 
     def save(self, record: Dict[str, Any]) -> None:
-        tmp = self._path(record["decision_id"]).with_suffix(".tmp")
-        tmp.write_text(json.dumps(record, indent=2, sort_keys=True))
-        tmp.replace(self._path(record["decision_id"]))
+        # Unique per-writer tmp file: concurrent writers of DIFFERENT
+        # decisions must never share one .tmp path; concurrent writers of
+        # the SAME decision are serialized by the flock in approve/deny/
+        # register/claim/mark_executed.
+        target = self._path(record["decision_id"])
+        tmp = target.with_suffix(f".tmp.{os.getpid()}.{uuid.uuid4().hex[:8]}")
+        try:
+            tmp.write_text(json.dumps(record, indent=2, sort_keys=True))
+            os.replace(tmp, target)
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def _locked_update(self, decision_id: str, mutate,
+                       required: bool = True) -> Dict[str, Any]:
+        """Run ``mutate(rec)`` under the per-decision exclusive lock.
+
+        With ``required=False`` a missing record is passed as ``None`` so
+        idempotent creations (register) work inside the same lock.
+        """
+        with open(self._lock_path(decision_id), "a+") as lock_fh:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+            try:
+                rec = self.load(decision_id)
+                if rec is None and required:
+                    raise DecisionStateError(decision_id, "unknown decision")
+                rec = mutate(rec)
+                if rec is not None:
+                    self.save(rec)
+                return rec
+            finally:
+                fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
 
     def register(self, decision: SafetyDecision) -> None:
         """Persist a decision so approvals survive restarts."""
-        if self.load(decision.decision_id) is not None:
-            return  # idempotent
-        self.save({
-            "decision_id": decision.decision_id,
-            "action": decision.action,
-            "params_digest": decision.params_digest,
-            "envelope_digest": getattr(decision, "envelope_digest", ""),
-            "zone": decision.zone,
-            "ghost_classification": decision.ghost_classification,
-            "policy_result": decision.policy_result,
-            "approval_state": decision.required_approval_state or "none",
-            "execution_nonce": decision.execution_nonce,
-            "expiry": decision.expiry,
-            "created_at": decision.created_at,
-            "consumed_at": None,
-            "approved_at": None,
-            "claimed_at": None,
-            "denied_at": None,
-            "executed_at": None,
-            "crashed_at": None,
-        })
+        def _register(rec: Optional[Dict[str, Any]]):
+            if rec is not None:
+                return None  # idempotent
+            return {
+                "decision_id": decision.decision_id,
+                "action": decision.action,
+                "params_digest": decision.params_digest,
+                "envelope_digest": getattr(decision, "envelope_digest", ""),
+                "zone": decision.zone,
+                "ghost_classification": decision.ghost_classification,
+                "policy_result": decision.policy_result,
+                "approval_state": decision.required_approval_state or "none",
+                "execution_nonce": decision.execution_nonce,
+                "expiry": decision.expiry,
+                "created_at": decision.created_at,
+                "consumed_at": None,
+                "approved_at": None,
+                "claimed_at": None,
+                "denied_at": None,
+                "executed_at": None,
+                "crashed_at": None,
+            }
+        self._locked_update(decision.decision_id, _register, required=False)
 
     # -- state transitions -------------------------------------------------
 
     def approve(self, decision_id: str) -> Dict[str, Any]:
-        rec = self._require(decision_id)
-        if rec.get("policy_result") not in ("require_approval", "allow", "allow_shadow"):
-            # HARD_BLOCKED / fail-closed decisions can never be approved.
-            raise DecisionStateError(
-                decision_id, f"not approvable (policy={rec.get('policy_result')})")
-        if rec["approval_state"] in (STATE_CLAIMED, STATE_EXECUTED) or rec["approval_state"] in TERMINAL_STATES:
-            raise DecisionStateError(
-                decision_id, f"replay rejected (state={rec['approval_state']})")
-        if self._expired(rec):
-            rec["approval_state"] = "expired"
-            self.save(rec)
-            raise DecisionStateError(decision_id, "approval window expired")
-        rec["approval_state"] = "approved"
-        rec["approved_at"] = time.time()
-        self.save(rec)
-        return rec
+        def _approve(rec: Dict[str, Any]) -> Dict[str, Any]:
+            if rec.get("policy_result") not in ("require_approval", "allow", "allow_shadow"):
+                # HARD_BLOCKED / fail-closed decisions can never be approved.
+                raise DecisionStateError(
+                    decision_id, f"not approvable (policy={rec.get('policy_result')})")
+            if rec["approval_state"] in (STATE_CLAIMED, STATE_EXECUTED) or rec["approval_state"] in TERMINAL_STATES:
+                raise DecisionStateError(
+                    decision_id, f"replay rejected (state={rec['approval_state']})")
+            if self._expired(rec):
+                rec["approval_state"] = "expired"
+                self.save(rec)
+                raise DecisionStateError(decision_id, "approval window expired")
+            rec["approval_state"] = "approved"
+            rec["approved_at"] = time.time()
+            return rec
+        return self._locked_update(decision_id, _approve)
 
     def deny(self, decision_id: str) -> Dict[str, Any]:
-        rec = self._require(decision_id)
-        if rec["approval_state"] in (STATE_CLAIMED, STATE_EXECUTED) or rec["approval_state"] in TERMINAL_STATES:
-            raise DecisionStateError(
-                decision_id, f"replay rejected (state={rec['approval_state']})")
-        rec["approval_state"] = "denied"
-        rec["denied_at"] = time.time()
-        self.save(rec)
-        return rec
+        def _deny(rec: Dict[str, Any]) -> Dict[str, Any]:
+            if rec["approval_state"] in (STATE_CLAIMED, STATE_EXECUTED) or rec["approval_state"] in TERMINAL_STATES:
+                raise DecisionStateError(
+                    decision_id, f"replay rejected (state={rec['approval_state']})")
+            rec["approval_state"] = "denied"
+            rec["denied_at"] = time.time()
+            return rec
+        return self._locked_update(decision_id, _deny)
+
+    def mark_linked_consumed(
+        self, decision_id: str, permit_decision_id: str,
+    ) -> Dict[str, Any]:
+        """Resolve a PENDING decision whose action was executed under a
+        redeemed prior approval permit.
+
+        Terminal: the record can never be approved or claimed afterwards,
+        so no second execution can ever ride on this decision.
+        """
+        def _consume(rec: Dict[str, Any]) -> Dict[str, Any]:
+            state = rec.get("approval_state")
+            if state in (STATE_CLAIMED, STATE_EXECUTED) or state in TERMINAL_STATES:
+                return rec  # already resolved; nothing to do
+            rec["approval_state"] = "consumed"
+            rec["consumed_at"] = time.time()
+            rec["redeemed_permit_decision_id"] = permit_decision_id
+            return rec
+        return self._locked_update(decision_id, _consume)
 
     def _lock_path(self, decision_id: str) -> Path:
         return self._dir / f".{decision_id}.lock"
@@ -576,10 +628,17 @@ _GATE: Optional[SafetyDecisionGate] = None
 
 
 def get_gate(force_ghost: bool = False) -> SafetyDecisionGate:
-    """Process-wide canonical gate (one policy instance per runtime)."""
+    """Process-wide canonical gate (one policy instance per runtime).
+
+    ``force_ghost`` is honored on EVERY call: if the singleton already
+    exists without it, its flag is updated so a later ``--ghost`` request
+    is never silently downgraded to normal policy.
+    """
     global _GATE
     if _GATE is None:
         _GATE = SafetyDecisionGate(force_ghost=force_ghost)
+    elif force_ghost and not _GATE.force_ghost:
+        _GATE.force_ghost = True
     return _GATE
 
 
