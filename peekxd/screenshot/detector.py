@@ -7,6 +7,7 @@ from .generic import GenericProvider
 from .wayland import WaylandProvider
 from .windows_wsl import WindowsWslProvider
 from .x11 import X11Provider
+from ..core.utils import executable_available
 
 #: Kept for backward compatibility with the removal-era stubs. Capture is
 #: restored; callers should treat this constant as historical only.
@@ -43,6 +44,10 @@ def get_screenshot_provider() -> ScreenshotProvider:
         providers = [X11Provider(), GenericProvider()]
     elif desktop == DesktopEnvironment.WAYLAND:
         providers = [WaylandProvider(), GenericProvider()]
+        # KDE KWin does not implement wlr-screencopy (grim fails at runtime);
+        # prefer spectacle-based capture when available.
+        if executable_available("spectacle"):
+            providers.insert(0, GenericProvider())
     else:
         providers = [X11Provider(), WaylandProvider(), GenericProvider()]
 
