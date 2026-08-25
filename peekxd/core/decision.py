@@ -25,7 +25,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .zones import (
     GhostActionClassification,
@@ -209,11 +209,12 @@ class ApprovalStore:
         self.save(rec)
         return True
 
-    def find_approved_unconsumed(self, action: str, params_digest: str) -> Optional[Dict[str, Any]]:
+    def find_approved_unconsumed(
+        self, action: str, params_digest: str,
+    ) -> Optional[Dict[str, Any]]:
         """Return an approved-but-not-consumed record matching action+payload,
         or None. Used to redeem a prior out-of-band approval."""
         import glob as _glob
-        now = time.time()
         for p in sorted(_glob.glob(str(self._dir / "*.json"))):
             try:
                 rec = json.loads(Path(p).read_text())
@@ -311,7 +312,8 @@ class SafetyDecisionGate:
         )
 
         # HARD_BLOCKED_GHOST can never execute through ANY entry point.
-        if classification.classification == GhostActionClassification.HARD_BLOCKED_GHOST:
+        if (classification.classification
+                == GhostActionClassification.HARD_BLOCKED_GHOST):
             decision = SafetyDecision(
                 policy_result="hard_blocked",
                 required_approval_state="none",

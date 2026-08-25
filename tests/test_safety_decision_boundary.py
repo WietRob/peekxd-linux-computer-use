@@ -4,7 +4,6 @@ Every execution path must obtain exactly one SafetyDecision; denial,
 timeout, replay and HARD_BLOCKED_GHOST must execute nothing.
 """
 
-import json
 import tempfile
 import time
 from pathlib import Path
@@ -177,7 +176,6 @@ def test_pending_ghost_blocks_step_until_approved(tmp_path):
     assert typed == []  # nothing executed while pending
     assert results[0].get("pending_approval") is True
 
-    decision_dict = results[0]["decision"]
     # operator approves out-of-band via CLI/store…
     d2 = g.evaluate("type", {"text": "hello world"}, entry_point="macro")
     store.approve(d2.decision_id)
