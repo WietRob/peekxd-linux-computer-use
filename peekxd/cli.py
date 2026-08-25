@@ -1,15 +1,14 @@
 """CLI for peekxd Linux."""
 
 import json
-import os
 import sys
 from pathlib import Path
 
 import click
 
-from .core import detect_desktop, is_x11, is_wayland, peekxdError
-from .core.doctor import run_doctor
 from .config import ConfigManager
+from .core import detect_desktop, peekxdError
+from .core.doctor import run_doctor
 from .screenshot import REMOVED_SCREENSHOT_MESSAGE
 
 
@@ -383,8 +382,8 @@ def permissions():
     """Check system permissions."""
     from .input import get_input_provider
     from .inspection import get_inspection_provider
-    from .window import get_window_provider
     from .vision import get_vision_provider
+    from .window import get_window_provider
 
     def _status(label, check):
         try:
@@ -528,8 +527,8 @@ def agent_run(task, max_steps, step_delay, verbose, safety_level,
 
     Example: peekxd agent run "Open Firefox and go to github.com"
     """
-    from .core.safety import SafetyLevel
     from .agent import AgentOrchestrator
+    from .core.safety import SafetyLevel
 
     level_map = {"strict": SafetyLevel.STRICT, "normal": SafetyLevel.NORMAL,
                  "permissive": SafetyLevel.PERMISSIVE}
@@ -566,6 +565,7 @@ def agent_run(task, max_steps, step_delay, verbose, safety_level,
 def agent_tools():
     """List all available Hermes tool definitions (JSON)."""
     import json
+
     from .agent import get_hermes_tool_definitions
     tools = get_hermes_tool_definitions()
     click.echo(json.dumps(tools, indent=2))
@@ -594,6 +594,7 @@ def macro_run(steps_json, stop_on_error):
     Example: peekxd macro run '[{"action":"click","params":{"x":100,"y":200}}]'
     """
     import json
+
     from .agent import ActionSequence
 
     steps = json.loads(steps_json)
@@ -613,7 +614,7 @@ def macro_run(steps_json, stop_on_error):
 @click.option("--timeout", default=10.0, help="Timeout in seconds")
 def wait_for(element, text, stable, change, timeout):
     """Wait for a condition on screen."""
-    from .agent.actions import WaitCondition, ScreenDiff
+    from .agent.actions import WaitCondition
 
     if element:
         result = WaitCondition.for_element(element, timeout)
@@ -644,6 +645,7 @@ def safety():
 def safety_check(action, params_json):
     """Check if an action would pass safety checks."""
     import json
+
     from .core.safety import SafetyGuard, SafetyLevel
 
     guard = SafetyGuard(SafetyLevel.NORMAL)
@@ -661,6 +663,7 @@ def safety_check(action, params_json):
 def safety_preview(action, params_json):
     """Preview what an action would do (dry-run, no execution)."""
     import json
+
     from .core.safety import DryRunExecutor
 
     dry = DryRunExecutor()
@@ -672,10 +675,13 @@ def safety_preview(action, params_json):
 @safety.command(name="decide")
 @click.argument("action")
 @click.argument("params_json", default="{}")
-@click.option("--entry-point", default="cli", help="Calling surface: cli|macro|mcp|orchestrator|bridge")
-@click.option("--json-output", "as_json", is_flag=True, help="Emit the SafetyDecision as JSON")
+@click.option("--entry-point", default="cli",
+              help="Calling surface: cli|macro|mcp|orchestrator|bridge")
+@click.option("--json-output", "as_json", is_flag=True,
+              help="Emit the SafetyDecision as JSON")
 @click.option("--confirmable/--no-confirmable", default=False,
-              help="Route zero-risk approvable actions to the confirmable-ghost approval flow (Softbox V4)")
+              help="Route zero-risk approvable actions to the "
+                   "confirmable-ghost approval flow (Softbox V4)")
 def safety_decide(action, params_json, entry_point, as_json, confirmable):
     """Obtain the canonical SafetyDecision for an action (no execution).
 
@@ -683,6 +689,7 @@ def safety_decide(action, params_json, entry_point, as_json, confirmable):
     this decision rather than duplicating policy logic.
     """
     import json as _json
+
     from .core.decision import get_gate
 
     params = _json.loads(params_json) if params_json else {}
@@ -695,7 +702,8 @@ def safety_decide(action, params_json, entry_point, as_json, confirmable):
     click.echo(
         f"decision_id={decision.decision_id}\n"
         f"zone={decision.zone} classification={decision.ghost_classification}\n"
-        f"policy={decision.policy_result} approval_state={decision.required_approval_state}\n"
+        f"policy={decision.policy_result} "
+        f"approval_state={decision.required_approval_state}\n"
         f"expiry={decision.expiry} nonce={decision.execution_nonce[:8]}…\n"
         f"correlation={decision.evidence_correlation_id}\n"
         f"reason={decision.reason}"
@@ -708,6 +716,7 @@ def safety_decide(action, params_json, entry_point, as_json, confirmable):
 def safety_approve(decision_id, as_json):
     """Approve a pending APPROVABLE_GHOST decision (permits ONE execution)."""
     import json as _json
+
     from .core.decision import ApprovalStore, DecisionStateError
 
     store = ApprovalStore()
@@ -754,7 +763,8 @@ def safety_status_cmd(decision_id):
     rows = []
     for p in sorted(_glob.glob(str(store._dir / "*.json")))[-10:]:
         rec = json.loads(Path(p).read_text())
-        rows.append(f"{rec['decision_id']}  {rec.get('approval_state'):9s}  {rec.get('action')}")
+        rows.append(f"{rec['decision_id']}  "
+                    f"{rec.get('approval_state'):9s}  {rec.get('action')}")
     click.echo("\n".join(rows) or "no decisions recorded")
 
 
@@ -794,7 +804,6 @@ def audit_export(output_path):
 @audit.command(name="summary")
 def audit_summary():
     """Show audit session summary."""
-    import json
     from .core.audit import get_logger
     summary = get_logger().get_session_summary()
     click.echo(f"Session: {summary['session_id']}")
