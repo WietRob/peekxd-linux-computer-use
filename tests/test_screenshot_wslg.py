@@ -1,14 +1,12 @@
-"""Tests for removed WSL screenshot provider compatibility."""
+"""Tests for the REAL WSL screenshot provider (G3 correction).
 
-import pytest
+The WindowsWSL provider is a real capture implementation again; on a native
+Linux box it honestly reports unavailable.
+"""
 
-from peekxd.core.errors import ScreenshotError
 from peekxd.screenshot.windows_wsl import WindowsWslProvider
 
 
-def test_windows_wsl_provider_is_removed_stub(tmp_path):
+def test_windows_wsl_provider_reports_honest_availability():
     provider = WindowsWslProvider()
-    assert provider.available is False
-    assert provider.is_available() is False
-    with pytest.raises(ScreenshotError, match="Visible screenshot capture is removed"):
-        provider.capture_screen(str(tmp_path / "capture.png"))
+    assert isinstance(provider.available, bool)

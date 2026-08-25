@@ -135,11 +135,11 @@ class ZoneDecision:
     }
 
     # Removed pixel-capture/vision actions. These must never be classified as
-    # DIRECT just because they used to be observational.
+    # DIRECT just because they used to be observational. NOTE (G3): visible
+    # screenshot capture itself was RESTORED by Owner decision — only the
+    # genuinely retired vision/markup actions remain hard-removed here.
     _REMOVED_SCREENSHOT_ACTIONS = {
-        "capture_screen",
         "mark_elements",
-        "screenshot",
         "analyze_screen",
         "analyze_image",
         "find_and_click",
@@ -147,9 +147,18 @@ class ZoneDecision:
         "screen_has_changed",
     }
 
-    # Actions that execute with before/after snapshot (Shadow Mode V2)
+    # Real screenshot capture actions (G3 restoration): observational, DIRECT.
+    _CAPTURE_ACTIONS = {
+        "capture_screen",
+        "capture_window",
+        "capture_region",
+        "screenshot",
+    }
+
+    # Actions that execute with before/after snapshot (Shadow Mode V2).
+    # "move" is the CLI-facing name of move_mouse.
     _SHADOW_ACTIONS = {
-        "click", "drag",
+        "click", "drag", "move",
     }
 
     # Actions that modify state but are generally low-risk
@@ -227,7 +236,7 @@ class ZoneDecision:
 
         # 4. Check for protected paths in output_path
         output_path = params.get("output_path", "")
-        if isinstance(output_path, str):
+        if isinstance(output_path, str) and output_path:
             protected = ["/", "/bin", "/sbin", "/usr/bin", "/usr/sbin",
                          "/etc", "/boot", "/dev", "/proc", "/sys",
                          "/lib", "/lib64", "/usr/lib", "/usr/lib64"]
@@ -242,6 +251,7 @@ class ZoneDecision:
             | cls._LOW_RISK_ACTIONS
             | cls._MODIFYING_ACTIONS
             | cls._REMOVED_SCREENSHOT_ACTIONS
+            | cls._CAPTURE_ACTIONS
         )
         if action not in known_actions:
             risk_factors.append(f"unknown_action: {action}")

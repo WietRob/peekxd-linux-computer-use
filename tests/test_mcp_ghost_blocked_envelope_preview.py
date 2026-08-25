@@ -27,17 +27,11 @@ def test_ghost_blocked_mcp_response_includes_structured_preview_envelope():
     raw_tool.assert_not_called()
     assert result["success"] is False
     assert result["blocked"] is True
-    assert result["error"].startswith("Blocked by SafetyGuard")
+    assert result["error"].startswith("Blocked by SafetyDecisionGate")
     assert result["zone"] == "ghost"
-    assert result["ghost_preview"] == ZoneDecision.create_ghost_preview(
-        "type_text",
-        params,
-        decision,
-    ).to_dict()
-    assert result["ghost_preview"]["risk_factors"] == decision.risk_factors
-    assert result["ghost_preview"]["text_preview"] == params["text"]
-    assert result["ghost_preview"]["markup_path"] is None
-    assert result["ghost_preview"]["required_confirmation"] is True
+    assert result["safety_decision"]["decision_id"]
+    assert result["safety_decision"]["policy_result"] == "hard_blocked"
+    assert result["safety_decision"]["params_digest"]
     assert result["audit_id"]
 
 

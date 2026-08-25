@@ -151,9 +151,9 @@ def test_macro_run_harmless_click_executes_with_correlation(tmp_path):
     assert r["success"] is True
     assert r["safety_policy"] == "allow_shadow"
     assert r["evidence_correlation_id"]
-    # the consumed decision is recorded in the ledger
+    # the decision is terminally EXECUTED in the ledger (atomic claim machine)
     rec = store.load(r["safety_decision_id"])
-    assert rec["approval_state"] == "consumed"
+    assert rec["approval_state"] == "executed"
 
 
 def test_pending_ghost_blocks_step_until_approved(tmp_path):
@@ -178,10 +178,23 @@ def test_pending_ghost_blocks_step_until_approved(tmp_path):
     assert typed == []  # nothing executed while pending
     assert results[0].get("pending_approval") is True
 
-    # operator approves out-of-band via CLI/store…
-    d2 = g.evaluate("type", {"text": "hello world"}, entry_point="macro")
-    store.approve(d2.decision_id)
-    # …and a fresh sequence run consumes the approval once:
-    results2 = seq.execute(safety_gate=g)
+    # operator approves out-of-band via store, bound to the EXACT decision…
+    d1 = results[0]["decision"]
+    store.approve(d1["decision_id"])
+    # …and a fresh sequence run redeems it via decision_id + nonce, exactly once:
+    results2 = seq.execute(
+        safety_gate=g,
+        approved_decision_id=d1["decision_id"],
+        execution_nonce=d1["execution_nonce"],
+    )
     assert typed == ["hello world"], "approved action now executed once"
     assert results2[0]["success"] is True
+
+    # replay with the same binding executes nothing more:
+    results3 = seq.execute(
+        safety_gate=g,
+        approved_decision_id=d1["decision_id"],
+        execution_nonce=d1["execution_nonce"],
+    )
+    assert len(typed) == 1, "replay must not execute again"
+    assert results3[0].get("pending_approval") is True

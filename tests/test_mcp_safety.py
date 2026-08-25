@@ -27,14 +27,14 @@ def test_middleware_enriches_dict_response_with_zone_and_audit_id():
     )
     result = wrapped(x=10, y=20)
 
-    guard.check_zone.assert_called_once_with("move_mouse", {"x": 10, "y": 20})
+    # G3: the CANONICAL gate decides execution — the legacy guard's check_zone
+    # is only a preview/deny signal and can no longer allow an action by itself.
     assert result["success"] is True
     assert result["zone"] == "direct"
-    assert result["risk_level"] == "safe"
+    assert result["decision_id"]
     assert result["audit_id"] == "mcp-test:0"
     assert result["safety_capability_version"] == MCP_SAFETY_CAPABILITY_VERSION
     assert logger.actions[0].action == "move_mouse"
-    assert logger.actions[0].result["zone"] == "direct"
     assert logger.actions[0].result["executed"] is True
 
 
@@ -50,6 +50,7 @@ def test_middleware_wraps_non_dict_response_in_result_envelope():
 
     assert result["result"] == [{"id": "win1"}]
     assert result["zone"] == "direct"
+    assert result["decision_id"]
     assert result["audit_id"] == "mcp-test:0"
 
 
@@ -73,8 +74,7 @@ def test_middleware_blocks_ghost_zone_without_calling_tool():
     assert result["success"] is False
     assert result["blocked"] is True
     assert result["zone"] == "ghost"
-    assert result["risk_level"] == "destructive"
-    assert "Blocked by SafetyGuard" in result["error"]
+    assert "Blocked by SafetyDecisionGate" in result["error"]
     assert result["audit_id"] == "mcp-test:0"
     assert logger.actions[0].error == result["error"]
     assert logger.actions[0].result["executed"] is False
@@ -110,8 +110,9 @@ def test_check_action_strict_mode_blocks_destructive_pattern():
     wrapped = middleware.wrap_tool("type_text", tool)
     result = wrapped(text="rm -rf /home")
 
-    guard.check_zone.assert_called_once_with("type_text", {"text": "rm -rf /home"})
-    guard.check_action.assert_called_once_with("type_text", {"text": "rm -rf /home"})
+    # G3 ordering: the canonical gate hard-blocks destructive content before
+    # the deny-only content screen runs — the tool must never be called.
+    guard.check_action.assert_not_called()
     tool.assert_not_called()
     assert result["success"] is False
     assert result["blocked"] is True

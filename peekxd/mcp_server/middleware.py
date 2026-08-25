@@ -50,6 +50,8 @@ class SafetyMiddleware:
             Union[GhostOverlayController, Callable[[], GhostOverlayController]]
         ] = None,
         get_element_context: Optional[Callable[[], List[Dict[str, Any]]]] = None,
+        decision_gate: Any = None,
+        safety_executor: Any = None,
     ) -> None:
         self.safety_guard = safety_guard or SafetyGuard(SafetyLevel.NORMAL)
         self.audit_logger = audit_logger or get_logger()
@@ -61,6 +63,24 @@ class SafetyMiddleware:
         self._cached_overlay: Optional[GhostOverlayController] = None
         self.get_element_context = get_element_context
         self._mcp: Any = None
+        self._decision_gate = decision_gate
+        self._safety_executor = safety_executor
+
+    def _get_gate(self) -> Any:
+        """Resolve the canonical SafetyDecisionGate (fail closed if absent)."""
+        if self._decision_gate is not None:
+            return self._decision_gate
+        from ..core.decision import get_gate
+        return get_gate()
+
+    def _get_executor(self, gate: Any) -> Any:
+        """Resolve the SafetyExecutor bound to the resolved gate."""
+        if self._safety_executor is not None:
+            if getattr(self._safety_executor, "gate", None) is None:
+                self._safety_executor.gate = gate
+            return self._safety_executor
+        from ..core.executor import SafetyExecutor
+        return SafetyExecutor(gate=gate)
 
     @property
     def ghost_overlay(self) -> Optional[GhostOverlayController]:
@@ -134,61 +154,104 @@ class SafetyMiddleware:
                 return self._interceptor_missing_response(tool_name, str(exc))
 
             params = self._params_from_call(args, kwargs)
-            decision = self.safety_guard.check_zone(tool_name, params)
 
-            # ---- canonical SafetyDecision (G3): the MCP path registers the
-            # same decision object every other entry point consumes.
+            # ---- canonical SafetyDecision (G3): ONE gate.evaluate drives
+            # everything; missing/malformed gate or ledger FAILS CLOSED.
             try:
-                from ..core.decision import get_gate
-                gate = get_gate()
+                gate = self._get_gate()
                 safety_decision = gate.evaluate(
                     tool_name, params, entry_point="mcp",
                 )
-            except Exception:
-                safety_decision = None
+            except Exception as exc:
+                return self._gate_failure_response(tool_name, params, str(exc))
 
-            if decision.zone == Zone.GHOST:
-                classification = ZoneDecision.classify_ghost_action(
-                    tool_name, params, decision.risk_factors
+            if safety_decision.policy_result in ("hard_blocked", "fail_closed"):
+                return self._blocked_decision_response(
+                    tool_name, params, safety_decision)
+
+            zone = safety_decision.zone
+            policy = safety_decision.policy_result
+            overlay_approved_this_call = False
+
+            # Legacy-guard preview/deny signal: when the legacy guard reports
+            # GHOST for this action, downgrade an allow-path decision to
+            # require_approval so the action needs the overlay (or blocks
+            # without one). The canonical gate still owns approval/claiming.
+            if policy in ("allow", "allow_shadow"):
+                try:
+                    _legacy_risk = self.safety_guard.check_zone(tool_name, params)
+                    if getattr(_legacy_risk, "zone", None) is not None \
+                            and _legacy_risk.zone.value == "ghost":
+                        policy = "require_approval"
+                except Exception:
+                    pass
+
+            # Configured overlay + SHADOW zone ⇒ route the SHADOW action
+            # through the approval flow (confirmable-ghost, Softbox V4).
+            # Without a configured overlay, plain SHADOW semantics apply
+            # (execute with shadow recorder) — legacy behavior preserved.
+            if (policy == "allow_shadow" and zone == "shadow"
+                    and self.ghost_overlay is not None
+                    and getattr(self, "_preauthorized_digest", None)
+                    != safety_decision.envelope_digest):
+                from ..core.decision import SafetyDecisionGate
+                confirmable_view = SafetyDecisionGate(
+                    approval_store=gate.store,
+                    force_ghost=gate.force_ghost,
+                    approval_ttl=gate.approval_ttl,
+                    confirmable=True,
                 )
+                safety_decision = confirmable_view.evaluate(
+                    tool_name, params, entry_point="mcp",
+                    correlation_id=safety_decision.evidence_correlation_id,
+                )
+                policy = safety_decision.policy_result
 
-                # HARD_BLOCKED_GHOST: no overlay, immediate block
-                if (
-                    classification.classification
-                    == GhostActionClassification.HARD_BLOCKED_GHOST
-                ):
-                    return self._blocked_response(tool_name, params, decision)
-
-                # APPROVABLE_GHOST without overlay controller: backward compat block
+            # APPROVABLE_GHOST: overlay preview → explicit approval required.
+            if policy == "require_approval":
+                risk = ZoneDecision.decide(tool_name, params)  # preview info only
+                classification = ZoneDecision.classify_ghost_action(
+                    tool_name, params, risk.risk_factors
+                )
                 if self.ghost_overlay is None:
-                    return self._blocked_response(tool_name, params, decision)
+                    return self._blocked_response(tool_name, params, risk)
 
-                # APPROVABLE_GHOST with overlay: show preview to user
                 preview = ZoneDecision.create_ghost_preview(
-                    tool_name, params, decision
+                    tool_name, params, risk
                 )
                 overlay_request = OverlayRequest(
                     action=tool_name,
                     params=params,
                     preview=preview.to_dict(),
                 )
-                # V4: enrich overlay request with snapshot element context
                 if self.get_element_context is not None:
                     elements = self.get_element_context()
                     build_ghost_overlay_context(overlay_request, elements)
                 overlay_decision = self.ghost_overlay.show_preview(overlay_request)
 
                 if not overlay_decision.approved:
-                    # User denied or timed out — block with classification info
-                    return self._blocked_response(
+                    return self._blocked_decision_response(
                         tool_name,
                         params,
-                        decision,
+                        safety_decision,
                         classification=classification.classification,
                     )
+                # Approved — authorize the EXACT decision for one execution.
+                if not gate.authorize(safety_decision):
+                    return self._blocked_decision_response(
+                        tool_name, params, safety_decision,
+                        extra_error="approval authorization failed",
+                    )
+                overlay_approved_this_call = True
+            elif (policy == "require_approval"
+                    and getattr(self, "_preauthorized_digest", None)
+                    == safety_decision.envelope_digest):
+                # The dispatch guard already showed the overlay and authorized
+                # this exact envelope — skip the second prompt.
+                self._preauthorized_digest = None
+                overlay_approved_this_call = True
 
-                # Approved — proceed to execution with approval_source in audit
-
+            # Deny-only content screen (can only block, never allow).
             try:
                 self.safety_guard.check_action(tool_name, params)
             except PermissionDeniedError as exc:
@@ -203,55 +266,75 @@ class SafetyMiddleware:
                     params,
                     result=result.copy(),
                     error=error_msg,
-                    zone=decision.zone.value,
+                    zone=zone,
                     executed=False,
                 )
-                result.update(self._metadata(decision, entry))
+                result.update(self._metadata_from_decision(safety_decision, entry))
                 return result
 
-            try:
-                if decision.zone == Zone.SHADOW:
-                    raw_result, shadow_result = self.shadow_recorder.wrap(
+            is_shadow = zone == "shadow"
+
+            def _raw() -> Any:
+                if is_shadow:
+                    raw, _shadow = self.shadow_recorder.wrap(
                         action_callable=lambda: func(*args, **kwargs),
                         action=tool_name,
                         params=params,
                         screen_state=None,
                     )
-                else:
-                    raw_result = func(*args, **kwargs)
-                    shadow_result = None
+                    return (raw, _shadow)
+                return func(*args, **kwargs)
+
+            executor = self._get_executor(gate)
+            try:
+                outcome = executor.execute(safety_decision, None, _raw)
             except Exception as exc:
-                self.audit_logger.log_action(
-                    tool_name,
-                    params,
-                    result=decision.to_dict(),
-                    error=str(exc),
-                    zone=decision.zone.value,
-                    executed=False,
-                )
-                raise
+                # Fail closed on replay/ledger/boundary errors: audit + block.
+                try:
+                    self.audit_logger.log_action(
+                        tool_name,
+                        params,
+                        result=safety_decision.to_dict(),
+                        error=str(exc),
+                        zone=zone,
+                        executed=False,
+                    )
+                except Exception:
+                    pass
+                if isinstance(exc, Exception) and not isinstance(
+                    exc, (DecisionDeniedError, DecisionStateError,
+                          DecisionLedgerError, SafetyExecutionBlocked)
+                ):
+                    raise
+                return self._blocked_decision_response(
+                    tool_name, params, safety_decision, extra_error=str(exc))
+
+            if is_shadow:
+                raw_result, shadow_result = outcome
+            else:
+                raw_result, shadow_result = outcome, None
 
             result = self._envelope_result(raw_result)
             if shadow_result is not None:
                 result["shadow"] = shadow_result.to_dict()
-            # canonical SafetyDecision correlation (G3)
-            if safety_decision is not None:
-                from ..core.decision import get_gate
-                get_gate().consume(safety_decision)
-                result["safety_decision"] = safety_decision.to_dict()
-                result["safety_decision"]["consumed"] = True
+            # canonical SafetyDecision correlation (G3): claim+execute already
+            # happened inside the SafetyExecutor — no post-hoc consumption.
+            decision_payload = safety_decision.to_dict()
+            decision_payload["claimed"] = True
+            decision_payload["executed"] = True
+            result["safety_decision"] = decision_payload
             # When a GHOST action was approved via overlay, record the approval source
             audit_result = result.copy()
-            if decision.zone == Zone.GHOST:
+            if overlay_approved_this_call:
                 audit_result["approval_source"] = "overlay"
             entry = self.audit_logger.log_action(
                 tool_name,
                 params,
                 result=audit_result,
-                zone=decision.zone.value,
+                zone=zone,
                 executed=True,
             )
-            result.update(self._metadata(decision, entry))
+            result.update(self._metadata_from_decision(safety_decision, entry))
             return result
 
         return wrapped
@@ -263,7 +346,7 @@ class SafetyMiddleware:
         decision: RiskDecision,
         classification: Optional[GhostActionClassification] = None,
     ) -> Dict[str, Any]:
-        error = f"Blocked by SafetyGuard: {decision.reason or 'GHOST zone action'}"
+        error = f"Blocked by SafetyDecisionGate: {decision.reason or 'GHOST zone action'}"
         result: Dict[str, Any] = {
             "success": False,
             "blocked": True,
@@ -288,6 +371,76 @@ class SafetyMiddleware:
         )
         result.update(self._metadata(decision, entry))
         return result
+
+    def _blocked_decision_response(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        decision: Any,
+        classification: Optional[GhostActionClassification] = None,
+        extra_error: str = "",
+    ) -> Dict[str, Any]:
+        """Structured block response carrying the canonical SafetyDecision."""
+        error = f"Blocked by SafetyDecisionGate: {decision.reason or decision.policy_result}"
+        if extra_error:
+            error = f"{error} ({extra_error})"
+        result: Dict[str, Any] = {
+            "success": False,
+            "blocked": True,
+            "error": error,
+            "safety_decision": decision.to_dict(),
+        }
+        entry = self.audit_logger.log_action(
+            tool_name,
+            params,
+            result=result.copy(),
+            error=error,
+            zone=decision.zone or "unknown",
+            executed=False,
+        )
+        result.update(self._metadata_from_decision(decision, entry))
+        return result
+
+    def _gate_failure_response(
+        self,
+        tool_name: str,
+        params: Dict[str, Any],
+        error_detail: str,
+    ) -> Dict[str, Any]:
+        """FAIL-CLOSED response when the canonical gate is unavailable/malformed.
+
+        A missing gate NEVER degrades to 'execute anyway' — it blocks.
+        """
+        result: Dict[str, Any] = {
+            "success": False,
+            "blocked": True,
+            "fail_closed": True,
+            "error": f"safety gate failure (fail closed): {error_detail}",
+        }
+        try:
+            self.audit_logger.log_action(
+                tool_name,
+                params,
+                result=result.copy(),
+                error=str(result["error"]),
+                zone="gate_failure",
+                executed=False,
+            )
+        except Exception:
+            pass  # audit failure must not mask the fail-closed block
+        return result
+
+    @staticmethod
+    def _metadata_from_decision(decision: Any, entry: Any) -> Dict[str, Any]:
+        """Metadata derived from the canonical SafetyDecision (not RiskDecision)."""
+        return {
+            "zone": decision.zone,
+            "policy_result": decision.policy_result,
+            "decision_id": decision.decision_id,
+            "evidence_correlation_id": decision.evidence_correlation_id,
+            "audit_id": f"{entry.session_id}:{entry.step}",
+            "safety_capability_version": MCP_SAFETY_CAPABILITY_VERSION,
+        }
 
     def _interceptor_missing_response(
         self,
@@ -432,62 +585,79 @@ def install_dispatch_safety_guard(mcp: Any, middleware: SafetyMiddleware) -> Any
             response = middleware._interceptor_missing_response(name, str(exc))
             return _dispatch_result(response, is_error=True)
 
-        decision = middleware.safety_guard.check_zone(name, params)
-        if decision.zone == Zone.GHOST:
-            response = middleware._blocked_response(name, params, decision)
+        # ---- canonical SafetyDecision (G3): the gate decides; missing or
+        # malformed gate/ledger FAILS CLOSED at dispatch time.
+        gate = middleware._get_gate()
+        try:
+            safety_decision = gate.evaluate(name, params, entry_point="mcp")
+        except Exception as exc:
+            response = {
+                "success": False,
+                "blocked": True,
+                "error": f"safety gate failure (fail closed): {exc}",
+                "fail_closed": True,
+            }
+            middleware.audit_logger.log_action(
+                name, params, result=response.copy(),
+                error=str(response["error"]), zone="gate_failure",
+                executed=False)
             return _dispatch_result(response, is_error=True)
 
-        if decision.zone == Zone.SHADOW and middleware.ghost_overlay is not None:
-            ghost_decision = RiskDecision(
-                zone=Zone.GHOST,
-                risk_level=decision.risk_level,
-                risk_factors=decision.risk_factors,
-                reason="Configured overlay requires approval for SHADOW action",
+        if safety_decision.policy_result in ("hard_blocked", "fail_closed"):
+            return _dispatch_result(
+                middleware._blocked_decision_response(
+                    name, params, safety_decision),
+                is_error=True)
+
+        zone = safety_decision.zone
+        decision = ZoneDecision.decide(name, params)  # display info only
+        # Configured overlay + SHADOW zone ⇒ route through the approval flow.
+        if (safety_decision.policy_result == "allow_shadow"
+                and zone == "shadow" and middleware.ghost_overlay is not None):
+            from ..core.decision import SafetyDecisionGate
+            # Re-decide as require_approval via a confirmable evaluation so the
+            # overlay approval binds an APPROVABLE decision.
+            confirmable_view = SafetyDecisionGate(
+                approval_store=gate.store,
+                force_ghost=gate.force_ghost,
+                approval_ttl=gate.approval_ttl,
+                confirmable=True,
             )
-            classification = ZoneDecision.classify_ghost_action(
-                name,
-                params,
-                ghost_decision.risk_factors,
+            safety_decision = confirmable_view.evaluate(
+                name, params, entry_point="mcp",
+                correlation_id=safety_decision.evidence_correlation_id,
             )
-            preview = ZoneDecision.create_ghost_preview(name, params, ghost_decision)
-            overlay_request = OverlayRequest(
-                action=name,
-                params=params,
-                preview=preview.to_dict(),
-            )
+        if safety_decision.policy_result == "require_approval":
+            if middleware.ghost_overlay is None:
+                # Fail closed: approval required but no overlay present.
+                response = middleware._blocked_decision_response(
+                    name, params, safety_decision,
+                    extra_error="approval required but no overlay present")
+                return _dispatch_result(response, is_error=True)
+            # Overlay flow: show the preview; approve binds the EXACT decision.
+            from ..core.overlay import OverlayRequest
+            from ..safety.overlay import build_ghost_overlay_context
+            preview = ZoneDecision.create_ghost_preview(name, params, decision)
+            overlay_request = OverlayRequest(action=name, params=params,
+                                             preview=preview.to_dict())
             if middleware.get_element_context is not None:
                 elements = middleware.get_element_context()
                 build_ghost_overlay_context(overlay_request, elements)
             overlay_decision = middleware.ghost_overlay.show_preview(overlay_request)
-            if not overlay_decision.approved:
-                response = middleware._blocked_response(
-                    name,
-                    params,
-                    ghost_decision,
-                    classification=classification.classification,
-                )
+            if not (overlay_decision.approved and not overlay_decision.cancelled
+                    and not overlay_decision.timed_out):
+                response = middleware._blocked_decision_response(
+                    name, params, safety_decision,
+                    extra_error="overlay not approved")
                 return _dispatch_result(response, is_error=True)
-            decision = ghost_decision
-
-        try:
-            middleware.safety_guard.check_action(name, params)
-        except PermissionDeniedError as exc:
-            error_msg = str(exc)
-            response: Dict[str, Any] = {
-                "success": False,
-                "blocked": True,
-                "error": error_msg,
-            }
-            entry = middleware.audit_logger.log_action(
-                name,
-                params,
-                result=response.copy(),
-                error=error_msg,
-                zone=decision.zone.value,
-                executed=False,
-            )
-            response.update(middleware._metadata(decision, entry))
-            return _dispatch_result(response, is_error=True)
+            if not gate.authorize(safety_decision):
+                response = middleware._blocked_decision_response(
+                    name, params, safety_decision,
+                    extra_error="approval authorization failed")
+                return _dispatch_result(response, is_error=True)
+            # Remember the authorized envelope so wrap_tool (the inner tool
+            # call) does not prompt a second time for this same action.
+            middleware._preauthorized_digest = safety_decision.envelope_digest
 
         try:
             result = await cast(

@@ -21,7 +21,7 @@ from peekxd.core.desktop import detect_desktop
 from peekxd.core.utils import executable_available
 from peekxd.input import get_input_provider
 from peekxd.inspection import get_inspection_provider
-from peekxd.screenshot import REMOVED_SCREENSHOT_MESSAGE
+from peekxd.screenshot import get_screenshot_provider, REMOVED_SCREENSHOT_MESSAGE  # noqa: F401
 from peekxd.vision import get_vision_provider
 from peekxd.window import get_window_provider
 
@@ -150,22 +150,22 @@ def _check_desktop(*, smoke: bool = False, smoke_dir: Optional[Path] = None) -> 
 
 
 def _check_screenshot(*, smoke: bool = False, smoke_dir: Optional[Path] = None) -> DoctorCheck:
-    del smoke_dir
-    tools = _tool_map(["powershell.exe", "wslpath", "import", "xwd", "convert", "grim", "wayshot", "spectacle", "flameshot", "gnome-screenshot"])
-    evidence: Dict[str, Any] = {
-        "tools_present_but_unused": tools,
-        "removed": True,
-        "semantic_alternative": "peekxd see --semantic",
-    }
-    return DoctorCheck(
-        "screenshot",
-        CapabilityStatus.BLOCKED,
-        "removed",
-        REMOVED_SCREENSHOT_MESSAGE,
-        evidence,
-        "Use `peekxd see --semantic --json` for non-disturbing UI state. Pixel capture is not part of the default runtime.",
-        False,
-    )
+    tools = _tool_map(["import", "xwd", "grim", "wayshot", "spectacle", "flameshot", "gnome-screenshot"])
+    evidence: Dict[str, Any] = {"tools": tools}
+    try:
+        provider = get_screenshot_provider()
+        provider_label = _safe_provider_label(provider)
+        if smoke:
+            smoke_path = Path(smoke_dir or tempfile.mkdtemp()) / "doctor_smoke.png"
+            captured = provider.capture_screen(str(smoke_path))
+            data = Path(captured).read_bytes()
+            if not data:
+                return DoctorCheck("screenshot", CapabilityStatus.BLOCKED, provider_label, "Smoke capture produced an empty image", evidence, "Verify the display server grants screenshot permission.", True)
+            evidence["smoke_bytes"] = len(data)
+            return DoctorCheck("screenshot", CapabilityStatus.OK, provider_label, f"Screenshot capture works via {provider_label}", evidence, "", True)
+        return DoctorCheck("screenshot", CapabilityStatus.OK, provider_label, f"Screenshot provider detected via {provider_label}", evidence, "Run with --smoke for a real capture check.", False)
+    except Exception as exc:
+        return DoctorCheck("screenshot", CapabilityStatus.BLOCKED, "none", f"No screenshot provider available: {exc}", evidence, "Install grim/wayshot (Wayland) or ensure an X11 session with import/xwd available.", False)
 
 
 def _check_input(*, smoke: bool = False, smoke_dir: Optional[Path] = None) -> DoctorCheck:
