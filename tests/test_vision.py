@@ -605,12 +605,14 @@ class TestGetVisionProvider(unittest.TestCase):
     @patch("peekxd.vision.detector.OpenAIVisionProvider")
     @patch("peekxd.vision.detector.AnthropicVisionProvider")
     @patch("peekxd.vision.detector.OllamaVisionProvider")
-    def test_no_providers_available(self, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
+    @patch("peekxd.vision.detector.OpenAICompatVisionProvider")
+    def test_no_providers_available(self, mock_openai_compat, mock_ollama, mock_anthropic, mock_openai, mock_hermes):
         """When no provider is available, raise ProviderNotAvailableError."""
         mock_hermes.return_value = MagicMock(available=False)
         mock_openai.return_value = MagicMock(available=False)
         mock_anthropic.return_value = MagicMock(available=False)
         mock_ollama.return_value = MagicMock(available=False)
+        mock_openai_compat.return_value = MagicMock(available=False)
 
         with self.assertRaises(ProviderNotAvailableError) as ctx:
             get_vision_provider()
