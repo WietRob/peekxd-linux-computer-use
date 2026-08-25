@@ -12,6 +12,7 @@ from peekxd.vision.hermes import HermesVisionProvider
 from peekxd.vision.openai import OpenAIVisionProvider
 from peekxd.vision.anthropic import AnthropicVisionProvider
 from peekxd.vision.ollama import OllamaVisionProvider
+from peekxd.vision.openai_compat import OpenAICompatVisionProvider
 
 
 def get_vision_provider(provider_name: Optional[str] = None) -> VisionProvider:
@@ -37,6 +38,7 @@ def get_vision_provider(provider_name: Optional[str] = None) -> VisionProvider:
         "openai": OpenAIVisionProvider(),
         "anthropic": AnthropicVisionProvider(),
         "ollama": OllamaVisionProvider(),
+        "openai-compat": OpenAICompatVisionProvider(),
     }
 
     if provider_name and provider_name in providers:
