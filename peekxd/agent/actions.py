@@ -161,17 +161,86 @@ class ActionSequence:
         ))
         return self
 
-    def execute(self, stop_on_error: bool = True) -> List[Dict[str, Any]]:
-        """Execute all steps in the sequence."""
+    def execute(self, stop_on_error: bool = True,
+                safety_gate=None) -> List[Dict[str, Any]]:
+        """Execute all steps in the sequence.
+
+        Every step passes through the canonical SafetyDecisionGate
+        (G3): SHADOW/DIRECT execute with evidence correlation; APPROVABLE_GHOST
+        requires a prior per-decision approval consumed exactly once;
+        HARD_BLOCKED_GHOST and denials/timeout/replay execute nothing.
+        ``peekxd macro run`` and every other ActionSequence consumer is
+        covered by this single boundary.
+        """
         from ..input import get_input_provider
+        from ..core.decision import (
+            DecisionDeniedError,
+            get_gate,
+        )
 
         if self._input is None:
             self._input = get_input_provider()
 
+        gate = safety_gate or get_gate()
         self.results = []
 
         for i, step in enumerate(self.steps):
             result = {"step": i, "action": step.action, "description": step.description, "success": False}
+
+            # ---- canonical SafetyDecision boundary (no execution without it)
+            try:
+                decision = gate.evaluate(
+                    step.action, step.params, entry_point="macro",
+                )
+                result["safety_decision_id"] = decision.decision_id
+                result["safety_policy"] = decision.policy_result
+                result["evidence_correlation_id"] = decision.evidence_correlation_id
+
+                if decision.policy_result == "require_approval":
+                    # Redeem a prior out-of-band approval bound to the exact
+                    # action + payload (params digest). None → stays pending.
+                    prior = gate.store.find_approved_unconsumed(
+                        decision.action, decision.params_digest)
+                    if prior is not None and gate.store.consume(prior["decision_id"]):
+                        result["redeemed_approval_decision_id"] = prior["decision_id"]
+                        # approval redeemed → fall through to execution below
+                    else:
+                        result.update({
+                            "success": False,
+                            "blocked": True,
+                            "error": (
+                                f"APPROVABLE_GHOST pending approval "
+                                f"(decision {decision.decision_id}, "
+                                f"expires {decision.expiry})"
+                            ),
+                            "pending_approval": True,
+                            "decision": decision.to_dict(),
+                        })
+                        self.results.append(result)
+                        if stop_on_error:
+                            break
+                        continue
+
+                if decision.policy_result == "require_approval":
+                    # reached only when a prior approval was redeemed above
+                    pass
+                elif not gate.is_execution_allowed(decision):
+                    raise DecisionDeniedError(decision)
+                elif not gate.consume(decision):
+                    raise DecisionDeniedError(decision)
+
+            except DecisionDeniedError as exc:
+                result.update({
+                    "success": False,
+                    "blocked": True,
+                    "error": str(exc),
+                    "decision": exc.decision.to_dict(),
+                })
+                self.results.append(result)
+                if stop_on_error:
+                    break
+                continue
+            # ---- boundary end
 
             for attempt in range(step.retry):
                 try:

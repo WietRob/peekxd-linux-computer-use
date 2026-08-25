@@ -136,6 +136,17 @@ class SafetyMiddleware:
             params = self._params_from_call(args, kwargs)
             decision = self.safety_guard.check_zone(tool_name, params)
 
+            # ---- canonical SafetyDecision (G3): the MCP path registers the
+            # same decision object every other entry point consumes.
+            try:
+                from ..core.decision import get_gate
+                gate = get_gate()
+                safety_decision = gate.evaluate(
+                    tool_name, params, entry_point="mcp",
+                )
+            except Exception:
+                safety_decision = None
+
             if decision.zone == Zone.GHOST:
                 classification = ZoneDecision.classify_ghost_action(
                     tool_name, params, decision.risk_factors
@@ -223,6 +234,12 @@ class SafetyMiddleware:
             result = self._envelope_result(raw_result)
             if shadow_result is not None:
                 result["shadow"] = shadow_result.to_dict()
+            # canonical SafetyDecision correlation (G3)
+            if safety_decision is not None:
+                from ..core.decision import get_gate
+                get_gate().consume(safety_decision)
+                result["safety_decision"] = safety_decision.to_dict()
+                result["safety_decision"]["consumed"] = True
             # When a GHOST action was approved via overlay, record the approval source
             audit_result = result.copy()
             if decision.zone == Zone.GHOST:
