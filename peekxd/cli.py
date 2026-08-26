@@ -909,8 +909,39 @@ def version():
     click.echo("peekxd-linux 0.3.0")
 
 
+_OWNER_DISABLE_MARKERS = (
+    # Runtime marker (persistent across installs/venvs)
+    Path.home() / ".local" / "state" / "peekxd" / "OWNER-DISABLED",
+    # Repo-local marker (source checkout disablement)
+    Path(__file__).resolve().parent.parent / "OWNER-DISABLED",
+)
+
+
+def _owner_disabled() -> bool:
+    """Owner kill switch (2026-08-26): PeekXD Computer Use INSTALLED_DISABLED.
+
+    Every CLI entry fails closed while a disable marker exists. No capture,
+    UI tree, input, or macro execution without a new explicit per-run Owner
+    authorization. This is checked BEFORE any provider/probe runs.
+    """
+    import os as _os
+
+    if _os.environ.get("PEEKXD_OWNER_AUTHORIZED_RUN") == "1":
+        return False
+    return any(m.exists() for m in _OWNER_DISABLE_MARKERS)
+
+
 def main():
     """Entry point."""
+    if _owner_disabled():
+        click.echo(
+            "PEEKXD DISABLED BY OWNER (2026-08-26): computer use is "
+            "INSTALLED_DISABLED. No capture, UI tree, input, or macro "
+            "execution. Requires explicit per-run Owner authorization "
+            "(PEEKXD_OWNER_AUTHORIZED_RUN=1).",
+            err=True,
+        )
+        sys.exit(3)
     try:
         cli()
     except peekxdError as e:
