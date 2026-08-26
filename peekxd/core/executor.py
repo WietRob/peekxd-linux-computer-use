@@ -43,6 +43,25 @@ class SafetyExecutionBlocked(PermissionError):
         super().__init__(f"[SAFETY-EXECUTOR] {why}")
 
 
+def _owner_disabled() -> bool:
+    """Owner kill switch (2026-08-26): PeekXD Computer Use INSTALLED_DISABLED.
+
+    In-process execution (SafetyExecutor) also fails closed while an
+    OWNER-DISABLED marker exists. Bypass requires the explicit per-run
+    Owner authorization env (PEEKXD_OWNER_AUTHORIZED_RUN=1).
+    """
+    import os as _os
+    from pathlib import Path as _Path
+
+    if _os.environ.get("PEEKXD_OWNER_AUTHORIZED_RUN") == "1":
+        return False
+    markers = (
+        _Path.home() / ".local" / "state" / "peekxd" / "OWNER-DISABLED",
+        _Path(__file__).resolve().parent.parent / "OWNER-DISABLED",
+    )
+    return any(m.exists() for m in markers)
+
+
 class SafetyExecutor:
     """Single raw-execution boundary. Nothing else may touch the provider."""
 
@@ -81,6 +100,11 @@ class SafetyExecutor:
         runner: Callable[[], Any],
     ) -> Any:
         """Claim + run + mark-executed. Raises instead of executing unsafely."""
+        if _owner_disabled():
+            raise SafetyExecutionBlocked(
+                "PEEKXD DISABLED BY OWNER (2026-08-26): computer use is "
+                "INSTALLED_DISABLED; execution requires explicit per-run "
+                "Owner authorization (PEEKXD_OWNER_AUTHORIZED_RUN=1).")
         gate = self._require_gate()
         decision = self._require_well_formed(decision)
 
