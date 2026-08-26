@@ -24,6 +24,21 @@ class GenericProvider(ScreenshotProvider):
         """Capture the full screen using the best available tool."""
         if executable_available("spectacle"):
             run_command(["spectacle", "-b", "-o", output_path])
+            # spectacle exits 0 but writes asynchronously — wait briefly for
+            # the file to appear and become non-empty.
+            import os as _os
+            import time as _time
+            deadline = _time.time() + 10.0
+            while _time.time() < deadline:
+                if (_os.path.isfile(output_path)
+                        and _os.path.getsize(output_path) > 0):
+                    break
+                _time.sleep(0.2)
+            if not _os.path.isfile(output_path) or _os.path.getsize(output_path) == 0:
+                raise ScreenshotError(
+                    f"spectacle produced no image at {output_path}; "
+                    "check that the parent directory exists and is writable",
+                )
         elif executable_available("flameshot"):
             run_command(["flameshot", "full", "-p", output_path])
         elif executable_available("gnome-screenshot"):
