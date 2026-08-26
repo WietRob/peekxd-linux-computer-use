@@ -284,11 +284,12 @@ class ActionSequence:
                     # effect; this run's own decision must be resolved
                     # TERMINALLY so it can never later be approved/claimed
                     # for an action that has already executed.
-                    try:
-                        gate.store.mark_linked_consumed(
-                            decision.decision_id, str(prior_id or ""))
-                    except Exception:
-                        pass  # never blocks the already-permitted execution
+                    #
+                    # FAIL CLOSED: if the terminal ledger write fails, the
+                    # side effect must NOT run — a record left PENDING after
+                    # execution would be an approval/claim replay path.
+                    gate.store.mark_linked_consumed(
+                        decision.decision_id, str(prior_id or ""))
                     result["current_decision_resolved"] = "consumed"
                     for attempt in range(step.retry):
                         try:
