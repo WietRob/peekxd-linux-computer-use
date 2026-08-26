@@ -85,10 +85,13 @@ class TestZoneDecision:
         assert any("system_key" in f for f in decision.risk_factors)
 
     def test_removed_capture_action_ghost(self):
-        """Screenshot actions are blocked, not direct observations."""
-        decision = ZoneDecision.decide("capture_screen", {"output_path": "/etc/passwd.png"})
+        """Retired vision actions are blocked; real capture is allowed again."""
+        decision = ZoneDecision.decide("analyze_screen", {})
         assert decision.zone == Zone.GHOST
         assert any("removed_screenshot_action" in f for f in decision.risk_factors)
+        # G3: visible screenshot capture was restored by Owner decision.
+        capture = ZoneDecision.decide("capture_screen", {"output_path": "shot.png"})
+        assert capture.zone != Zone.GHOST
 
     def test_list_windows_direct(self):
         """List windows should be DIRECT."""

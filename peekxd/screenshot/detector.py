@@ -1,25 +1,62 @@
-"""Screenshot provider selection for peekxd.
+"""Auto-detect the best screenshot provider for the current environment."""
 
-Visible screenshot capture has been intentionally removed from the default
-PeekXD runtime because GNOME/Wayland/x-d-g-desktop-portal prompts can disturb
-or block the user's live desktop. PeekXD's supported observation primitive is
-now semantic accessibility/window state (``peekxd see --semantic``), not pixels.
-"""
-
+from ..core.desktop import DesktopEnvironment, detect_desktop
 from ..core.errors import ProviderNotAvailableError
 from .base import ScreenshotProvider
+from .generic import GenericProvider
+from .wayland import WaylandProvider
+from .windows_wsl import WindowsWslProvider
+from .x11 import X11Provider
+from ..core.utils import executable_available
 
+#: Kept for backward compatibility with the removal-era stubs. Capture is
+#: restored; callers should treat this constant as historical only.
 REMOVED_SCREENSHOT_MESSAGE = (
-    "Visible screenshot capture is removed from PeekXD's default runtime. "
-    "Use `peekxd see --semantic` for non-disturbing accessibility/window state."
+    "Screenshot capture is available again via `peekxd capture screen|window|region`."
 )
 
 
 def get_screenshot_provider() -> ScreenshotProvider:
-    """Screenshots are intentionally unavailable.
+    """Auto-detect and return the best screenshot provider.
 
-    This function exists only as a compatibility seam for old callers. It never
-    selects portal, gnome-screenshot, grim, wayshot, Spectacle, Flameshot, X11,
-    WSL host capture, or PipeWire providers.
+    The detection order depends on the detected desktop environment:
+
+    - **WSL/WSLg**: WindowsWslProvider -> native desktop providers -> GenericProvider
+    - **X11**: X11Provider -> GenericProvider
+    - **Wayland**: WaylandProvider -> GenericProvider
+    - **Unknown**: X11Provider -> WaylandProvider -> GenericProvider
+
+    Returns:
+        An instance of the first available :class:`ScreenshotProvider`.
+
+    Raises:
+        ProviderNotAvailableError: If no provider is available.
     """
-    raise ProviderNotAvailableError(REMOVED_SCREENSHOT_MESSAGE)
+    desktop = detect_desktop()
+    wsl_provider = WindowsWslProvider()
+
+    if wsl_provider.available:
+        # WSLg often advertises Wayland/X11 while root capture fails at runtime
+        # (BadMatch / unable to read X window image root). Prefer the Windows
+        # host capture path in WSL because it captures the actual visible desktop.
+        providers = [wsl_provider, X11Provider(), WaylandProvider(), GenericProvider()]
+    elif desktop == DesktopEnvironment.X11:
+        providers = [X11Provider(), GenericProvider()]
+    elif desktop == DesktopEnvironment.WAYLAND:
+        providers = [WaylandProvider(), GenericProvider()]
+        # KDE KWin does not implement wlr-screencopy (grim fails at runtime);
+        # prefer spectacle-based capture when available.
+        if executable_available("spectacle"):
+            providers.insert(0, GenericProvider())
+    else:
+        providers = [X11Provider(), WaylandProvider(), GenericProvider()]
+
+    for provider in providers:
+        if provider.available:
+            return provider
+
+    raise ProviderNotAvailableError(
+        "No screenshot provider available. "
+        "Install: grim (Wayland), imagemagick (X11), "
+        "or spectacle/flameshot (generic).",
+    )

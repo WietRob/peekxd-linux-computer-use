@@ -1,7 +1,9 @@
 """Tests for the peekxd CLI."""
 
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -242,29 +244,52 @@ class TestCLI:
         assert "See and analyze the screen" in result.output
         mock_get_screenshot.assert_not_called()
 
-    def test_capture_screen_removed(self, mock_submodules, runner):
-        """capture screen is removed and does not call screenshot provider."""
+    def test_capture_screen_real(self, mock_submodules, runner):
+        """capture screen performs a real capture via the provider (G3)."""
+        import hashlib
         provider = mock_submodules["peekxd.screenshot"]
-        result = runner.invoke(cli, ["capture", "screen", "-o", "/tmp/test.png"])
-        assert result.exit_code != 0
-        assert "Visible screenshot capture is removed" in result.output
-        provider.capture_screen.assert_not_called()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+            out_path = fh.name
+        try:
+            with patch("peekxd.screenshot.get_screenshot_provider") as mock_get:
+                mock_get.return_value.capture_screen.return_value = out_path
+                Path(out_path).write_bytes(b"png")
+                result = runner.invoke(cli, ["capture", "screen", "-o", out_path])
+            assert result.exit_code == 0
+            assert f"Captured screen -> {out_path}" in result.output
+            assert "sha256:" in result.output
+        finally:
+            os.unlink(out_path)
 
-    def test_capture_window_removed(self, mock_submodules, runner):
-        """capture window is removed and does not call screenshot provider."""
+    def test_capture_window_real(self, mock_submodules, runner):
+        """capture window performs a real capture via the provider."""
         provider = mock_submodules["peekxd.screenshot"]
-        result = runner.invoke(cli, ["capture", "window", "--id", "0x01"])
-        assert result.exit_code != 0
-        assert "Visible screenshot capture is removed" in result.output
-        provider.capture_window.assert_not_called()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+            out_path = fh.name
+        try:
+            with patch("peekxd.screenshot.get_screenshot_provider") as mock_get:
+                mock_get.return_value.capture_window.return_value = out_path
+                Path(out_path).write_bytes(b"png")
+                result = runner.invoke(cli, ["capture", "window", "--id", "0x01", "-o", out_path])
+            assert result.exit_code == 0
+            assert "Captured window" in result.output
+        finally:
+            os.unlink(out_path)
 
-    def test_capture_region_removed(self, mock_submodules, runner):
-        """capture region is removed and does not call screenshot provider."""
+    def test_capture_region_real(self, mock_submodules, runner):
+        """capture region performs a real capture via the provider."""
         provider = mock_submodules["peekxd.screenshot"]
-        result = runner.invoke(cli, ["capture", "region", "10", "20", "100", "200"])
-        assert result.exit_code != 0
-        assert "Visible screenshot capture is removed" in result.output
-        provider.capture_region.assert_not_called()
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
+            out_path = fh.name
+        try:
+            with patch("peekxd.screenshot.get_screenshot_provider") as mock_get:
+                mock_get.return_value.capture_region.return_value = out_path
+                Path(out_path).write_bytes(b"png")
+                result = runner.invoke(cli, ["capture", "region", "10", "20", "100", "200", "-o", out_path])
+            assert result.exit_code == 0
+            assert "Captured region" in result.output
+        finally:
+            os.unlink(out_path)
 
     def test_inspect_tree_command(self, mock_submodules, runner):
         """inspect tree command invokes the inspection provider."""
@@ -359,14 +384,12 @@ class TestCLI:
         assert not hasattr(mod, "get_screenshot_provider") or callable(mod.get_screenshot_provider)
 
     def test_see_capture_removed(self, mock_submodules, runner):
-        """legacy see capture path is removed in favor of see --semantic."""
-        mod = sys.modules["peekxd.screenshot"]
-
+        """legacy see capture path still refuses; use see --semantic."""
         result = runner.invoke(cli, ["see", "capture"])
 
         assert result.exit_code != 0
-        assert "Visible screenshot capture is removed" in result.output
-        assert not hasattr(mod, "get_screenshot_provider") or callable(mod.get_screenshot_provider)
+        assert "Screenshot capture is available again" in result.output or \
+            "see --semantic" in result.output
 
     def test_see_semantic_json_uses_inspection_without_screenshot(self, mock_submodules, runner):
         """see --semantic --json returns semantic envelope without screenshot provider."""

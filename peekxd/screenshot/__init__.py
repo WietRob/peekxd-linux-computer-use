@@ -1,12 +1,15 @@
 """Screenshot module compatibility surface.
 
-Visible screenshot capture has been removed from PeekXD. Provider classes remain
-importable only as stubs so old imports fail closed instead of triggering pixel
-capture or desktop portal prompts.
+Real screenshot capture (G3 correction): provider selection and pixel capture
+are fully re-enabled. ``peekxd capture screen|window|region`` performs real
+captures through the detected provider and reports sha256 + path.
 """
 
 from .base import ScreenshotProvider
-from .detector import REMOVED_SCREENSHOT_MESSAGE, get_screenshot_provider
+from .detector import (
+    REMOVED_SCREENSHOT_MESSAGE,
+    get_screenshot_provider,
+)
 from .generic import GenericProvider
 from .pipewire import PipeWireScreenCastProvider
 from .portal import XdgDesktopPortalProvider

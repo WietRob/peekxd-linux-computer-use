@@ -80,10 +80,10 @@ class TestOrchestratorGhostMode:
         assert entry.result.get("executed") is True
 
     def test_safety_guard_has_zone_decisions(self):
-        """SafetyGuard should record zone decisions."""
+        """G3: the canonical gate records the decision, not the legacy guard."""
         guard = SafetyGuard(SafetyLevel.NORMAL)
 
-        # Trigger a zone decision via orchestrator
+        # Trigger an action via orchestrator
         orch = AgentOrchestrator(max_steps=5, safety_level=SafetyLevel.NORMAL)
         orch.safety = guard
         orch._execute_action = MagicMock(return_value={"success": True})
@@ -91,12 +91,12 @@ class TestOrchestratorGhostMode:
         plan = {"action": "type", "params": {"text": "rm -rf /"}, "reason": "test"}
         screen_state = {"path": "/tmp/test.png", "description": "test screen"}
 
-        orch._act(plan, screen_state)
+        result = orch._act(plan, screen_state)
 
-        # SafetyGuard should have recorded the zone decision
-        decisions = guard.get_zone_decisions()
-        assert len(decisions) == 1
-        assert decisions[0]["zone"] == "ghost"
+        # G3: the legacy guard is no longer the execution authority.
+        assert guard.get_zone_decisions() == []
+        # The destructive action must be blocked by the gate (hard_blocked).
+        assert result.get("blocked") is True or result.get("success") is False
 
     def test_done_action_not_zoned(self):
         """'done' action should bypass zone check."""

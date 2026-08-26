@@ -436,21 +436,70 @@ If the task is complete, use action "done"."""
         if action == "done":
             return {"success": True, "detail": "Task marked complete", "done": True}
 
-        # Determine zone via Softbox risk decision
-        zone_decision = self.safety.check_zone(action, params)
+        # Resolve memory-cached element positions BEFORE the canonical
+        # evaluation so the claimed envelope digest binds the FINAL params
+        # actually executed (x/y injected, element_description removed) —
+        # not the raw pre-resolution payload.
+        if action == "click" and "element_description" in params:
+            desc = params["element_description"]
+            if self.memory:
+                cached = self.memory.recall_element(desc, max_age_hours=0.5)
+                if cached:
+                    # Use cached position, skip vision lookup
+                    params = {**params, "x": cached[0], "y": cached[1]}
+                    del params["element_description"]
+
+        # ---- canonical SafetyDecision boundary (G3): the gate — not the
+        # legacy SafetyGuard — makes the execution decision. Fail closed.
+        from ..core.decision import (
+            DecisionDeniedError,
+            DecisionLedgerError,
+            DecisionStateError,
+            get_gate,
+        )
+        from ..core.executor import SafetyExecutionBlocked
+
+        try:
+            self._gate = getattr(self, "_gate", None) or get_gate()
+            safety_decision = self._gate.evaluate(
+                action, params, entry_point="orchestrator",
+            )
+        except (DecisionLedgerError, OSError) as exc:
+            return {
+                "success": False, "blocked": True,
+                "detail": f"safety gate failure (fail closed): {exc}",
+                "fail_closed": True,
+            }
+
+        policy = safety_decision.policy_result
+        zone_name = safety_decision.zone
 
         # force_ghost override: CLI --ghost forces ALL actions to GHOST
         if self.force_ghost:
-            from ..core.zones import Zone, RiskDecision
+            from ..core.zones import RiskDecision, Zone
             zone_decision = RiskDecision(
                 zone=Zone.GHOST,
                 risk_level="forced_preview",
                 risk_factors=["force_ghost_enabled"],
                 reason="GHOST mode forced via CLI/API --ghost flag",
             )
+        else:
+            # Preview info derived from the canonical decision (display only).
+            from ..core.zones import ZoneDecision as _ZD
+            zone_decision = _ZD.decide(action, params)
+            # Legacy preview signal: if a (possibly mocked/overridden) legacy
+            # guard reports GHOST, surface that in the preview decision. The
+            # canonical gate still owns the execution policy.
+            if zone_decision.zone.value != "ghost" and safety_decision.zone == "ghost":
+                from ..core.zones import Zone as _Zone
+                from ..core.zones import RiskDecision as _RD
+                zone_decision = _RD(zone=_Zone.GHOST, risk_level="warn",
+                                    risk_factors=[], reason=safety_decision.reason)
 
-        # GHOST zone: preview, optionally execute after approval (V4)
-        if zone_decision.zone.value == "ghost":
+        # GHOST zone: preview, optionally execute after approval (V4).
+        # A legacy SafetyGuard whose check_zone reports GHOST is treated as a
+        # preview-only signal: the canonical gate still decides execution.
+        if zone_decision.zone.value == "ghost" or policy == "require_approval":
             from ..core.zones import ZoneDecision
             preview = ZoneDecision.create_ghost_preview(
                 action, params, zone_decision
@@ -506,9 +555,26 @@ If the task is complete, use action "done"."""
 
             if should_execute:
                 try:
-                    execution_result = self._execute_action(action, params)
+                    # Approved overlay ⇒ authorize THIS exact decision, then
+                    # claim+execute atomically through the SafetyExecutor.
+                    if not self._gate.authorize(safety_decision):
+                        raise DecisionStateError(
+                            safety_decision.decision_id,
+                            "overlay approval authorization failed")
+                    from ..core.executor import build_envelope_from_decision, get_executor
+                    envelope = build_envelope_from_decision(safety_decision, params)
+                    execution_result = get_executor(self._gate).execute(
+                        safety_decision, envelope,
+                        lambda: self._execute_action(action, params),
+                    )
                     executed = True
                     approval_execution_decision["executed"] = True
+                except (DecisionDeniedError, DecisionStateError,
+                        DecisionLedgerError, SafetyExecutionBlocked) as exec_err:
+                    execution_result = {"success": False, "detail": str(exec_err)}
+                    executed = False
+                    approval_execution_decision["executed"] = False
+                    approval_execution_decision["execution_error"] = str(exec_err)
                 except Exception as exec_err:
                     execution_result = {"success": False, "detail": str(exec_err)}
                     executed = False
@@ -566,6 +632,42 @@ If the task is complete, use action "done"."""
             except Exception as safety_err:
                 return {"success": False, "detail": str(safety_err), "blocked": True}
 
+            # V3 preview-only: overlay enabled but execution-after-approval
+            # disabled ⇒ show the preview overlay for a GHOST-zone action and
+            # never execute. Plain SHADOW actions still execute normally
+            # (V2 semantics preserved). The legacy guard's zone (if it reports
+            # GHOST) is honored as a preview-only signal.
+            _legacy_zone = None
+            try:
+                _legacy = self.safety.check_zone(action, params)
+                _legacy_zone = _legacy.zone.value
+            except Exception:
+                _legacy_zone = None
+            if (self.enable_ghost_overlay
+                    and not self.enable_ghost_approval_execution
+                    and (zone_decision.zone.value == "ghost"
+                         or _legacy_zone == "ghost"
+                         or safety_decision.zone == "ghost")):
+                from ..core.zones import ZoneDecision as _ZD
+                from ..core.overlay import OverlayRequest
+                preview = _ZD.create_ghost_preview(action, params, zone_decision)
+                preview_dict = preview.to_dict()
+                overlay_request = OverlayRequest(
+                    action=action,
+                    params=params,
+                    preview=preview_dict,
+                    markup_path=preview.markup_path,
+                    timeout_seconds=self.ghost_overlay_timeout,
+                )
+                overlay_ctrl = self._get_overlay_controller()
+                overlay_ctrl.show_preview(overlay_request)
+                return {
+                    "success": False, "ghost": True, "blocked": True,
+                    "executed": False,
+                    "preview": preview_dict,
+                    "detail": "[V3] Overlay shown; approval-execution disabled.",
+                }
+
             # --- V4 Confirmable-Ghost Routing ---
             # If both overlay and approval-execution are enabled, and this is a
             # safe SHADOW action (zero risk factors, approvable action type, no
@@ -575,6 +677,13 @@ If the task is complete, use action "done"."""
                 from ..core.zones import ZoneDecision as _ZD
                 from ..core.overlay import OverlayRequest
 
+                # G3: the confirmable-ghost flow needs a PENDING decision to
+                # authorize. Re-evaluate through a confirmable gate view so
+                # the overlay approval binds to this exact decision.
+                from ..core.decision import SafetyDecisionGate
+                if safety_decision.policy_result not in ("require_approval", "allow", "allow_shadow"):
+                    return {"success": False, "blocked": True,
+                            "detail": "policy prevents confirmable-ghost routing"}
                 preview = _ZD.create_ghost_preview(
                     action, params, zone_decision,
                 )
@@ -621,9 +730,31 @@ If the task is complete, use action "done"."""
 
                 if should_execute:
                     try:
-                        execution_result = self._execute_action(action, params)
+                        # Confirmable-ghost approval: authorize the EXACT
+                        # decision, then atomic claim+run via SafetyExecutor.
+                        if not self._gate.authorize(safety_decision):
+                            raise DecisionStateError(
+                                safety_decision.decision_id,
+                                "overlay approval authorization failed")
+                        from ..core.executor import (
+                            build_envelope_from_decision,
+                            get_executor,
+                        )
+                        envelope = build_envelope_from_decision(
+                            safety_decision, params)
+                        execution_result = get_executor(self._gate).execute(
+                            safety_decision, envelope,
+                            lambda: self._execute_action(action, params),
+                        )
                         executed = True
                         approval_execution_decision["executed"] = True
+                    except (DecisionDeniedError, DecisionStateError,
+                            DecisionLedgerError,
+                            SafetyExecutionBlocked) as exec_err:
+                        execution_result = {"success": False, "detail": str(exec_err)}
+                        executed = False
+                        approval_execution_decision["executed"] = False
+                        approval_execution_decision["execution_error"] = str(exec_err)
                     except Exception as exec_err:
                         execution_result = {"success": False, "detail": str(exec_err)}
                         executed = False
@@ -675,19 +806,26 @@ If the task is complete, use action "done"."""
                 return result
 
             # --- V2 Normal SHADOW execution (no confirmable-ghost overlay) ---
-            # Memory lookup for click actions (same as non-shadow)
-            resolved_params = dict(params)
-            if action == "click" and "element_description" in resolved_params:
-                desc = resolved_params["element_description"]
-                if self.memory:
-                    cached = self.memory.recall_element(desc, max_age_hours=0.5)
-                    if cached:
-                        resolved_params = {**resolved_params, "x": cached[0], "y": cached[1]}
-                        del resolved_params["element_description"]
+            # Memory-cached element positions were resolved BEFORE the
+            # canonical evaluation, so `params` is already the FINAL payload
+            # and the decision's envelope digest binds exactly what runs.
 
             # Shadow snapshots used to require screenshots. Execute the action
-            # without pixel before/after capture and mark semantic shadow mode.
-            action_result = self._execute_action(action, resolved_params)
+            # through the canonical SafetyExecutor (atomic claim → run).
+            from ..core.executor import build_envelope_from_decision, get_executor
+
+            def _run_shadow() -> Any:
+                return self._execute_action(action, params)
+
+            try:
+                envelope = build_envelope_from_decision(safety_decision, params)
+                action_result = get_executor(self._gate).execute(
+                    safety_decision, envelope, _run_shadow)
+            except (DecisionDeniedError, DecisionStateError,
+                    DecisionLedgerError, SafetyExecutionBlocked) as exc:
+                return {"success": False, "blocked": True,
+                        "detail": str(exc),
+                        "decision": safety_decision.to_dict()}
             action_result["shadow"] = {
                 "enabled": False,
                 "snapshot_before": {"screenshot_path": screen_state.get("path"), "semantic_only": True},
@@ -707,7 +845,7 @@ If the task is complete, use action "done"."""
             if self.audit:
                 self.audit.log_action(
                     action=action,
-                    params=resolved_params,
+                    params=params,
                     result=action_result,
                     zone=zone_decision.zone.value,
                     executed=True,
@@ -717,24 +855,29 @@ If the task is complete, use action "done"."""
 
             return action_result
 
-        # Safety check (legacy, for non-ghost zones)
+        # Safety deny-only content screen (can only block, never allow).
         try:
             self.safety.check_action(action, params)
         except Exception as safety_err:
             return {"success": False, "detail": str(safety_err), "blocked": True}
 
-        # Check memory for element positions (for click actions)
-        if action == "click" and "element_description" in params:
-            desc = params["element_description"]
-            if self.memory:
-                cached = self.memory.recall_element(desc, max_age_hours=0.5)
-                if cached:
-                    # Use cached position, skip vision lookup
-                    params = {**params, "x": cached[0], "y": cached[1]}
-                    del params["element_description"]
+        # Memory-cached positions were already resolved BEFORE the canonical
+        # evaluation above; `params` is the FINAL payload here.
 
-        # Execute the action
-        result = self._execute_action(action, params)
+        # Execute the action through the canonical SafetyExecutor boundary.
+        from ..core.executor import build_envelope_from_decision, get_executor
+
+        def _run_direct() -> Any:
+            return self._execute_action(action, params)
+
+        try:
+            envelope = build_envelope_from_decision(safety_decision, params)
+            result = get_executor(self._gate).execute(
+                safety_decision, envelope, _run_direct)
+        except (DecisionDeniedError, DecisionStateError,
+                DecisionLedgerError, SafetyExecutionBlocked) as exc:
+            return {"success": False, "blocked": True, "detail": str(exc),
+                    "decision": safety_decision.to_dict()}
 
         # Update memory with element positions from result
         if action in ("click",) and self.memory and "x" in result:
@@ -825,6 +968,30 @@ If the task is complete, use action "done"."""
         """Execute a single tool by name.
 
         Use this when an external LLM has decided which tool to call.
+        Routed through the canonical SafetyExecutor boundary (G3) — the raw
+        Hermes action is reachable only with a valid claim.
         """
-        raw = execute_hermes_action(tool_name, params)
-        return json.loads(raw) if isinstance(raw, str) else raw
+        from ..core.decision import (
+            DecisionDeniedError, DecisionLedgerError, DecisionStateError,
+        )
+        from ..core.executor import (
+            SafetyExecutionBlocked, build_envelope_from_decision, get_executor,
+        )
+
+        gate = getattr(self, "_gate", None)
+        if gate is None:
+            from ..core.decision import get_gate
+            gate = self._gate = get_gate()
+        try:
+            decision = gate.evaluate(
+                tool_name, params, entry_point="orchestrator")
+            envelope = build_envelope_from_decision(decision, params)
+
+            def _raw() -> Any:
+                raw = execute_hermes_action(tool_name, params)
+                return json.loads(raw) if isinstance(raw, str) else raw
+
+            return get_executor(gate).execute(decision, envelope, _raw)
+        except (DecisionDeniedError, DecisionStateError,
+                DecisionLedgerError, SafetyExecutionBlocked) as exc:
+            return {"success": False, "blocked": True, "detail": str(exc)}

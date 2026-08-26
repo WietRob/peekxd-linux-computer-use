@@ -18,6 +18,44 @@ def _fail_removed_screenshot_path() -> None:
     )
 
 
+def _run_guarded_cli_action(action, params, runner):
+    """Run one raw action through the canonical SafetyExecutor boundary (G3).
+
+    Every direct CLI action command goes through the same gate/executor as
+    MCP, macro and orchestrator paths. Any block raises ClickException.
+    """
+    from .core.decision import DecisionDeniedError, DecisionLedgerError, DecisionStateError
+    from .core.executor import SafetyExecutionBlocked, get_executor
+
+    try:
+        decision, _envelope, result = get_executor().evaluate_and_execute(
+            action, params, entry_point="cli", runner=runner,
+        )
+        return decision, result
+    except (DecisionDeniedError, DecisionStateError) as exc:
+        raise click.ClickException(f"BLOCKED by safety policy: {exc}") from exc
+    except (DecisionLedgerError, SafetyExecutionBlocked) as exc:
+        raise click.ClickException(f"SAFETY BOUNDARY FAILURE (fail closed): {exc}") from exc
+
+
+def _do_capture(kind: str, output, provider_fn) -> None:
+    """Perform a REAL screenshot capture and report path + sha256."""
+    import hashlib
+
+    from .screenshot import get_screenshot_provider
+
+    try:
+        provider = get_screenshot_provider()
+        path = provider_fn(provider, output)
+        data = Path(path).read_bytes()
+    except Exception as exc:
+        raise click.ClickException(f"Capture failed ({kind}): {exc}") from exc
+    if not data:
+        raise click.ClickException(f"Capture failed ({kind}): empty image at {path}")
+    click.echo(f"Captured {kind} -> {path}")
+    click.echo(f"sha256: {hashlib.sha256(data).hexdigest()}")
+
+
 @click.group()
 @click.option("--config", "-c", type=click.Path(), help="Path to config file")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
@@ -39,9 +77,14 @@ def capture():
 @click.option("--display", "-d", default=0, help="Display number")
 @click.pass_context
 def capture_screen(ctx, output, display):
-    """Screenshot capture was removed; use semantic state instead."""
-    del ctx, output, display
-    _fail_removed_screenshot_path()
+    """Capture the full screen to an image file."""
+    del ctx
+
+    def run(provider, out):
+        out = out or _default_capture_path("screen")
+        return provider.capture_screen(out, display=display)
+
+    _do_capture("screen", output, run)
 
 
 @capture.command(name="window")
@@ -49,9 +92,14 @@ def capture_screen(ctx, output, display):
 @click.option("--id", help="Window ID")
 @click.pass_context
 def capture_window(ctx, output, id):
-    """Screenshot capture was removed; use semantic state instead."""
-    del ctx, output, id
-    _fail_removed_screenshot_path()
+    """Capture a window (active window when --id omitted)."""
+    del ctx
+
+    def run(provider, out):
+        out = out or _default_capture_path("window")
+        return provider.capture_window(out, window_id=id)
+
+    _do_capture("window", output, run)
 
 
 @capture.command(name="region")
@@ -62,9 +110,19 @@ def capture_window(ctx, output, id):
 @click.option("--output", "-o", type=click.Path(), help="Output file path")
 @click.pass_context
 def capture_region(ctx, x, y, width, height, output):
-    """Screenshot capture was removed; use semantic state instead."""
-    del ctx, x, y, width, height, output
-    _fail_removed_screenshot_path()
+    """Capture a rectangular screen region to an image file."""
+    del ctx
+
+    def run(provider, out):
+        out = out or _default_capture_path("region")
+        return provider.capture_region(out, x=x, y=y, width=width, height=height)
+
+    _do_capture("region", output, run)
+
+
+def _default_capture_path(kind: str) -> str:
+    import time as _time
+    return str(Path.cwd() / f"peekxd_{kind}_{int(_time.time())}.png")
 
 
 @cli.group(invoke_without_command=True)
@@ -121,20 +179,28 @@ def see_capture(ctx, app, output, analyze):
 @click.option("--button", default="left", type=click.Choice(["left", "right", "middle"]))
 def click_cmd(x, y, element_id, button):
     """Click at X Y or on semantic element id."""
-    from .input import get_input_provider
-
-    input_provider = get_input_provider()
     if element_id:
+        from .input import get_input_provider
         from .semantic import build_semantic_snapshot, find_semantic_element
 
         element = find_semantic_element(build_semantic_snapshot(), element_id)
-        x, y = element.click_center(input_provider, button=button)
-        click.echo(f"Clicked {button} on {element_id} at {x},{y}")
+        decision, coords = _run_guarded_cli_action(
+            "click",
+            {"element_id": element_id, "button": button},
+            lambda: element.click_center(get_input_provider(), button=button),
+        )
+        cx, cy = coords if isinstance(coords, tuple) else (None, None)
+        click.echo(f"Clicked {button} on {element_id} at {cx},{cy} (decision {decision.decision_id})")
         return
 
     if x is None or y is None:
         raise click.UsageError("X and Y are required unless --on is provided")
-    input_provider.click(x, y, button)
+    from .input import get_input_provider
+
+    _run_guarded_cli_action(
+        "click", {"x": x, "y": y, "button": button},
+        lambda: get_input_provider().click(x, y, button),
+    )
     click.echo(f"Clicked {button} at {x},{y}")
 
 
@@ -143,18 +209,24 @@ def click_cmd(x, y, element_id, button):
 @click.option("--on", "element_id", help="Semantic element id to focus before typing, e.g. W1-T1")
 def type_cmd(text, element_id):
     """Type TEXT, optionally into a semantic element id."""
-    from .input import get_input_provider
-
-    input_provider = get_input_provider()
     if element_id:
+        from .input import get_input_provider
         from .semantic import build_semantic_snapshot, find_semantic_element
 
         element = find_semantic_element(build_semantic_snapshot(), element_id)
-        x, y = element.type_into(input_provider, text)
-        click.echo(f"Typed into {element_id} at {x},{y}: {text}")
+        decision, coords = _run_guarded_cli_action(
+            "type",
+            {"text": text, "element_id": element_id},
+            lambda: element.type_into(get_input_provider(), text),
+        )
+        tx, ty = coords if isinstance(coords, tuple) else (None, None)
+        click.echo(f"Typed into {element_id} at {tx},{ty}: {text} (decision {decision.decision_id})")
         return
 
-    input_provider.type_text(text)
+    from .input import get_input_provider
+
+    _run_guarded_cli_action(
+        "type", {"text": text}, lambda: get_input_provider().type_text(text))
     click.echo(f"Typed: {text}")
 
 
@@ -166,10 +238,13 @@ def key(key, hotkey):
     from .input import get_input_provider
     if hotkey:
         keys = key.split(",")
-        get_input_provider().hotkey(*keys)
+        _run_guarded_cli_action(
+            "hotkey", {"keys": keys},
+            lambda: get_input_provider().hotkey(*keys))
         click.echo(f"Hotkey: {'+'.join(keys)}")
     else:
-        get_input_provider().key_press(key)
+        _run_guarded_cli_action(
+            "key", {"key": key}, lambda: get_input_provider().key_press(key))
         click.echo(f"Key: {key}")
 
 
@@ -179,7 +254,9 @@ def key(key, hotkey):
 def move(x, y):
     """Move mouse to X Y."""
     from .input import get_input_provider
-    get_input_provider().move_mouse(x, y)
+    _run_guarded_cli_action(
+        "move", {"x": x, "y": y},
+        lambda: get_input_provider().move_mouse(x, y))
     click.echo(f"Moved to {x},{y}")
 
 
@@ -189,7 +266,9 @@ def move(x, y):
 def scroll(direction, amount):
     """Scroll in DIRECTION."""
     from .input import get_input_provider
-    get_input_provider().scroll(direction, amount)
+    _run_guarded_cli_action(
+        "scroll", {"direction": direction, "amount": amount},
+        lambda: get_input_provider().scroll(direction, amount))
     click.echo(f"Scrolled {direction} x{amount}")
 
 
@@ -212,7 +291,9 @@ def window_list():
 def window_focus(window_id):
     """Focus window by ID."""
     from .window import get_window_provider
-    get_window_provider().focus_window(window_id)
+    _run_guarded_cli_action(
+        "focus_window", {"window_id": window_id},
+        lambda: get_window_provider().focus_window(window_id))
     click.echo(f"Focused window {window_id}")
 
 

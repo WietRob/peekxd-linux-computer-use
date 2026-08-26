@@ -114,7 +114,7 @@ class TestPreviewActionMiddleware:
         # The middleware must let this through — it's a DIRECT zone tool
         # The tool function returns a dict, so _envelope_result passes it through
         assert result["zone"] == "direct"
-        assert result["risk_level"] == "safe"
+        assert result["decision_id"]
         assert result["audit_id"] == "mcp-preview-test:0"
         assert result["preview"]["preview"] is True
 
@@ -161,7 +161,7 @@ class TestPreviewActionMiddleware:
         result = wrapped(action="click", params={"x": 42, "y": 99})
 
         assert result["zone"] == "direct"
-        assert result["risk_level"] == "safe"
+        assert result["decision_id"]
         assert result["audit_id"] == "mcp-preview-test:0"
         assert result["preview"]["preview"] is True
         assert result["preview"]["action"] == "click"

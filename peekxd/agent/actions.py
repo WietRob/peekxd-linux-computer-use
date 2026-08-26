@@ -162,13 +162,18 @@ class ActionSequence:
         return self
 
     def execute(self, stop_on_error: bool = True,
-                safety_gate=None) -> List[Dict[str, Any]]:
+                safety_gate=None,
+                approved_decision_id: Optional[str] = None,
+                execution_nonce: Optional[str] = None,
+                ) -> List[Dict[str, Any]]:
         """Execute all steps in the sequence.
 
         Every step passes through the canonical SafetyDecisionGate
         (G3): SHADOW/DIRECT execute with evidence correlation; APPROVABLE_GHOST
-        requires a prior per-decision approval consumed exactly once;
-        HARD_BLOCKED_GHOST and denials/timeout/replay execute nothing.
+        requires an out-of-band approval bound to the EXACT decision
+        (``approved_decision_id`` + ``execution_nonce`` + full envelope
+        digest — never an action+digest search); HARD_BLOCKED_GHOST and
+        denials/timeout/replay execute nothing.
         ``peekxd macro run`` and every other ActionSequence consumer is
         covered by this single boundary.
         """
@@ -197,21 +202,72 @@ class ActionSequence:
                 result["evidence_correlation_id"] = decision.evidence_correlation_id
 
                 if decision.policy_result == "require_approval":
-                    # Redeem a prior out-of-band approval bound to the exact
-                    # action + payload (params digest). None → stays pending.
-                    prior = gate.store.find_approved_unconsumed(
-                        decision.action, decision.params_digest)
-                    if prior is not None and gate.store.consume(prior["decision_id"]):
-                        result["redeemed_approval_decision_id"] = prior["decision_id"]
-                        # approval redeemed → fall through to execution below
-                    else:
+                    # Exact binding ONLY: an out-of-band approval redeems this
+                    # decision by its exact decision_id + execution_nonce +
+                    # full envelope digest. No action+digest search.
+                    prior_id: Optional[str] = approved_decision_id
+                    prior_nonce = execution_nonce
+                    redeemed = False
+                    from ..core.decision import DecisionLedgerError
+                    if prior_id and prior_nonce:
+                        # Revalidate the COMPLETE envelope: the approved
+                        # record's stored digest must equal the digest of the
+                        # CURRENT decision for the same canonical payload
+                        # (action, params, entry point, targets). The random
+                        # per-decision correlation token is NOT part of the
+                        # binding — compare via a correlation-free rebuild.
+                        prior_rec = gate.store.load(prior_id)
+                        from ..core.envelope import build_envelope
+                        env = build_envelope(
+                            action=decision.action,
+                            params={
+                                k: v for k, v in (step.params or {}).items()
+                            },
+                            entry_point="macro",
+                            zone=decision.zone,
+                            target_application=decision.target_application,
+                            target_window=decision.target_window,
+                            correlation_id="",  # stable binding, no corr token
+                        )
+                        if (prior_rec is not None
+                                and str(prior_rec.get("execution_nonce")) == prior_nonce
+                                and env.digest() == prior_rec.get("envelope_digest")
+                                and not gate.store._expired(prior_rec)):
+                            try:
+                                gate.store.claim(
+                                    prior_id,
+                                    expected_nonce=prior_nonce,
+                                    envelope_digest=decision.envelope_digest,
+                                )
+                                gate.store.mark_executed(prior_id)
+                                # The ledger must show the permit (PRIOR
+                                # decision) EXECUTED bound to THIS exact
+                                # envelope before any side effect runs.
+                                permit_rec = gate.store.load(prior_id) or {}
+                                if (permit_rec.get("approval_state") != "executed"
+                                        or env.digest()
+                                        != str(permit_rec.get("envelope_digest") or "")):
+                                    raise DecisionLedgerError(
+                                        f"redeemed permit {prior_id} is not "
+                                        f"EXECUTED bound to this envelope")
+                                redeemed = True
+                                result["redeemed_approval_decision_id"] = prior_id
+                                result["executed_under_decision_id"] = prior_id
+                                result["decision_ids"] = [
+                                    prior_id, decision.decision_id,
+                                ]
+                            except Exception:
+                                redeemed = False
+                    if not redeemed:
                         result.update({
                             "success": False,
                             "blocked": True,
                             "error": (
                                 f"APPROVABLE_GHOST pending approval "
                                 f"(decision {decision.decision_id}, "
-                                f"expires {decision.expiry})"
+                                f"expires {decision.expiry}); approval must "
+                                f"bind decision_id + execution_nonce + "
+                                f"envelope digest"
                             ),
                             "pending_approval": True,
                             "decision": decision.to_dict(),
@@ -222,12 +278,40 @@ class ActionSequence:
                         continue
 
                 if decision.policy_result == "require_approval":
-                    # reached only when a prior approval was redeemed above
-                    pass
+                    # reached only when an exact-bound approval was redeemed
+                    # above (the PRIOR decision was claimed+executed). The
+                    # redeemed prior approval IS the permit for this side
+                    # effect; this run's own decision must be resolved
+                    # TERMINALLY so it can never later be approved/claimed
+                    # for an action that has already executed.
+                    #
+                    # FAIL CLOSED: if the terminal ledger write fails, the
+                    # side effect must NOT run — a record left PENDING after
+                    # execution would be an approval/claim replay path.
+                    gate.store.mark_linked_consumed(
+                        decision.decision_id, str(prior_id or ""))
+                    result["current_decision_resolved"] = "consumed"
+                    for attempt in range(step.retry):
+                        try:
+                            self._execute_step(step, result)
+                            result["success"] = True
+                            result["attempts"] = attempt + 1
+                            break
+                        except Exception as exc:
+                            result["error"] = str(exc)
+                            result["attempts"] = attempt + 1
+                            if attempt < step.retry - 1:
+                                time.sleep(0.5 * (attempt + 1))
+                    self.results.append(result)
+                    if step.delay_after > 0:
+                        time.sleep(step.delay_after)
+                    if not result["success"] and stop_on_error:
+                        break
+                    continue
                 elif not gate.is_execution_allowed(decision):
                     raise DecisionDeniedError(decision)
-                elif not gate.consume(decision):
-                    raise DecisionDeniedError(decision)
+                # NOTE: no gate.consume here — the SafetyExecutor below owns
+                # the atomic claim→run→executed transition (exactly once).
 
             except DecisionDeniedError as exc:
                 result.update({
@@ -242,11 +326,40 @@ class ActionSequence:
                 continue
             # ---- boundary end
 
+            # Execution itself goes through the canonical SafetyExecutor
+            # (atomic claim → run → executed). Raw provider access happens
+            # only inside the runner below.
+            from ..core.executor import (
+                DecisionDeniedError as _DDE,
+                DecisionLedgerError as _DLE,
+                DecisionStateError as _DSE,
+                SafetyExecutionBlocked as _SEB,
+                build_envelope_from_decision,
+                get_executor,
+            )
+            from ..core.decision import DecisionLedgerError  # noqa: F401
+
+            def _raw_step() -> Any:
+                self._execute_step(step, result)
+                return result.get("detail", "")
+
             for attempt in range(step.retry):
                 try:
-                    self._execute_step(step, result)
+                    envelope = build_envelope_from_decision(decision, {
+                        k: v for k, v in (step.params or {}).items()
+                        if not k.startswith("_")
+                    })
+                    get_executor(gate).execute(decision, envelope, _raw_step)
                     result["success"] = True
                     result["attempts"] = attempt + 1
+                    break
+                except (_DDE, _DSE, _DLE, _SEB) as exc:
+                    # Fail closed: policy/ledger/boundary errors are NOT retried.
+                    result.update({
+                        "success": False,
+                        "blocked": True,
+                        "error": str(exc),
+                    })
                     break
                 except Exception as exc:
                     result["error"] = str(exc)

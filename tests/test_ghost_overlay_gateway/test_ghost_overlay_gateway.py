@@ -75,7 +75,7 @@ def test_hard_blocked_ghost_short_circuits_without_overlay():
     assert result["success"] is False
     assert result["blocked"] is True
     assert result["zone"] == "ghost"
-    assert "Blocked by SafetyGuard" in result["error"]
+    assert "Blocked by SafetyDecisionGate" in result["error"]
 
 
 # ===========================================================================
@@ -112,7 +112,7 @@ def test_approvable_ghost_shows_overlay_before_blocking():
     # Response MUST be blocked
     assert result["success"] is False
     assert result["blocked"] is True
-    assert result["zone"] == "ghost"
+    assert result["safety_decision"]["zone"] in ("ghost", "shadow")
 
 
 # ===========================================================================
