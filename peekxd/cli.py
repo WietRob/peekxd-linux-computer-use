@@ -841,11 +841,22 @@ def safety_status_cmd(decision_id):
         click.echo(json.dumps(rec, indent=2))
         return
     import glob as _glob
+    import time as _time
+    recs = []
+    for p in _glob.glob(str(store._dir / "*.json")):
+        try:
+            recs.append(json.loads(Path(p).read_text()))
+        except Exception:
+            continue  # skip unreadable records in the listing
+    # Most recent first (created_at), not glob-hex order: with large ledgers
+    # the hex window hides the decisions an operator/adapter actually needs.
+    recs.sort(key=lambda r: float(r.get("created_at") or 0.0), reverse=True)
     rows = []
-    for p in sorted(_glob.glob(str(store._dir / "*.json")))[-10:]:
-        rec = json.loads(Path(p).read_text())
+    for rec in recs[:10]:
+        age = max(0.0, _time.time() - float(rec.get("created_at") or 0.0))
         rows.append(f"{rec['decision_id']}  "
-                    f"{rec.get('approval_state'):9s}  {rec.get('action')}")
+                    f"{rec.get('approval_state'):9s}  {rec.get('action')}"
+                    f"  ({age:.0f}s ago)")
     click.echo("\n".join(rows) or "no decisions recorded")
 
 
