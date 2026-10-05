@@ -62,8 +62,8 @@ peekxd/
 
 ```bash
 # 1. Clone
-git clone https://github.com/peekxd-linux/peekxd.git
-cd peekxd
+git clone https://github.com/WietRob/peekxd-linux-computer-use.git
+cd peekxd-linux-computer-use
 
 # 2. Install system dependencies (Ubuntu/Debian)
 sudo apt-get install -y xdotool imagemagick grim ydotool python3-pyatspi2
