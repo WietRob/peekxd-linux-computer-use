@@ -54,8 +54,8 @@ all = [
 peekxd = "peekxd.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/peekxd-linux/peekxd"
-Repository = "https://github.com/peekxd-linux/peekxd"
+Homepage = "https://github.com/WietRob/peekxd-linux-computer-use"
+Repository = "https://github.com/WietRob/peekxd-linux-computer-use"
 
 [tool.setuptools.packages.find]
 include = ["peekxd*"]

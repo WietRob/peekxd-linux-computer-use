@@ -62,7 +62,7 @@ peekxd/
 
 ```bash
 # 1. Clone
-git clone https://github.com/peekxd-linux/peekxd.git
+git clone https://github.com/WietRob/peekxd-linux-computer-use.git
 cd peekxd
 
 # 2. Install system dependencies (Ubuntu/Debian)
